@@ -8,6 +8,8 @@ Stack: **Fastify + TypeScript**, **node:sqlite** for local dev (zero native deps
 
 ## Quickstart (local, 30s)
 
+### With Node 22.11+ (uses `node:sqlite`)
+
 ```bash
 npm install
 cp .env.example .env
@@ -17,6 +19,17 @@ npm run dev     # http://localhost:3000 → dashboard prompts for ADMIN_TOKEN
 ```
 
 Requires **Node 22.11+** (for the built-in `node:sqlite`). The `.node-version` file pins this so Render picks the right version too.
+
+### With Bun (uses `bun:sqlite`)
+
+```bash
+bun install
+cp .env.example .env
+bun run seed:bun   # ~14 days of fake data (via bun runtime)
+bun run dev:bun    # http://localhost:3000
+```
+
+The backend detects the runtime at boot and picks the right SQLite driver. **Production on Render always uses Node** (pinned via `.node-version` + `render.yaml`), and once `DATABASE_URL` is set it uses Postgres regardless of runtime.
 
 ---
 
@@ -123,12 +136,22 @@ See `.env.example` for the complete list. The essentials:
 
 ## Development
 
+Node scripts (default):
+
 ```bash
 npm run typecheck   # tsc --noEmit
 npm run dev         # tsx watch, auto-reload
 npm run build       # tsc → dist/
-npm run start       # node dist/server.js  (prod entry)
+npm run start       # node dist/src/server.js  (prod entry)
 npm run seed        # populate ~14d of fake events
+```
+
+Bun scripts (local dev on Bun):
+
+```bash
+bun run dev:bun     # bun --watch, auto-reload
+bun run start:bun   # bun runs src/server.ts directly (no build step)
+bun run seed:bun    # populate ~14d of fake events via bun
 ```
 
 ---

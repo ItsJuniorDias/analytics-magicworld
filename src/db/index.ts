@@ -74,6 +74,19 @@ export async function makeDb(): Promise<Db> {
     await db.init();
     return db;
   }
+
+  // Runtime detection: Bun exposes `bun:sqlite`; Node 22.5+ exposes `node:sqlite`.
+  // The two modules have compatible-enough APIs, but neither exists on the
+  // other runtime. Guarding here keeps each driver file free of the other's
+  // built-in import so nothing gets eagerly resolved and crashes at boot.
+  const isBun = typeof (globalThis as { Bun?: unknown }).Bun !== "undefined";
+  if (isBun) {
+    const { BunSqliteDb } = await import("./sqlite-bun");
+    const db = new BunSqliteDb(config.sqlitePath);
+    await db.init();
+    return db;
+  }
+
   const { SqliteDb } = await import("./sqlite");
   const db = new SqliteDb(config.sqlitePath);
   await db.init();
