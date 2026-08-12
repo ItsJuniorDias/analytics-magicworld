@@ -1,0 +1,27 @@
+services:
+  - type: web
+    name: magic-world-analytics
+    runtime: node
+    plan: free
+    buildCommand: npm install && npm run build
+    startCommand: npm run start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: 22.11.0
+      - key: NODE_ENV
+        value: production
+      - key: ADMIN_TOKEN
+        generateValue: true
+      - key: DEFAULT_CURRENCY
+        value: BRL
+      - key: DATABASE_URL
+        fromDatabase:
+          name: magic-world-analytics-db
+          property: connectionString
+
+databases:
+  - name: magic-world-analytics-db
+    plan: free
+    databaseName: magic_world_analytics
+    user: magic_world_analytics

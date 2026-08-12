@@ -1,0 +1,509 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Magic World — Analytics</title>
+    <style>
+      :root {
+        --bg: #0b0b12;
+        --panel: #14141d;
+        --panel-2: #1c1c28;
+        --border: #26263a;
+        --text: #eaeaf2;
+        --muted: #8a8aa3;
+        --accent: #b57cff;
+        --accent-2: #7ce0ff;
+        --good: #7cffc4;
+        --warn: #ffcb7c;
+        --bad: #ff7c9d;
+        --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+      }
+      * { box-sizing: border-box; }
+      html, body {
+        margin: 0;
+        background: radial-gradient(1200px 600px at 10% -20%, #1a1230 0%, transparent 60%),
+                    radial-gradient(900px 600px at 100% 0%, #061428 0%, transparent 55%),
+                    var(--bg);
+        color: var(--text);
+        font-family: -apple-system, BlinkMacSystemFont, "Inter", system-ui, sans-serif;
+        min-height: 100vh;
+      }
+      header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 20px 28px;
+        border-bottom: 1px solid var(--border);
+      }
+      header h1 {
+        margin: 0;
+        font-size: 18px;
+        font-weight: 600;
+        letter-spacing: 0.2px;
+      }
+      header .brand {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      header .dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        background: linear-gradient(135deg, var(--accent), var(--accent-2));
+        box-shadow: 0 0 12px var(--accent);
+      }
+      header .actions { display: flex; gap: 8px; align-items: center; }
+      main { padding: 24px 28px 80px; max-width: 1200px; margin: 0 auto; }
+
+      .filters {
+        display: flex;
+        gap: 8px;
+        margin: 8px 0 24px;
+        flex-wrap: wrap;
+      }
+      .chip {
+        appearance: none;
+        border: 1px solid var(--border);
+        background: var(--panel);
+        color: var(--text);
+        padding: 8px 14px;
+        border-radius: 999px;
+        font-size: 13px;
+        cursor: pointer;
+        transition: transform 0.06s ease, background 0.12s ease, border-color 0.12s ease;
+      }
+      .chip:hover { transform: translateY(-1px); }
+      .chip[aria-pressed="true"] {
+        background: linear-gradient(135deg, rgba(181,124,255,0.14), rgba(124,224,255,0.14));
+        border-color: var(--accent);
+        color: #fff;
+      }
+
+      .grid {
+        display: grid;
+        gap: 16px;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        margin-bottom: 24px;
+      }
+      @media (max-width: 720px) { .grid { grid-template-columns: repeat(2, minmax(0,1fr)); } }
+
+      .card {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        padding: 16px 18px;
+      }
+      .card h3 {
+        margin: 0 0 6px;
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 500;
+        letter-spacing: 0.6px;
+        text-transform: uppercase;
+      }
+      .card .n {
+        font-size: 26px;
+        font-weight: 600;
+        font-variant-numeric: tabular-nums;
+      }
+      .card .sub {
+        margin-top: 4px;
+        color: var(--muted);
+        font-size: 12px;
+        font-variant-numeric: tabular-nums;
+      }
+
+      .panel {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        padding: 20px;
+        margin-bottom: 20px;
+      }
+      .panel h2 {
+        margin: 0 0 14px;
+        font-size: 14px;
+        color: var(--muted);
+        font-weight: 500;
+        letter-spacing: 0.4px;
+        text-transform: uppercase;
+      }
+
+      .funnel { display: grid; gap: 10px; }
+      .funnel .step {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+      .funnel .label {
+        width: 180px;
+        font-size: 13px;
+        color: var(--muted);
+      }
+      .funnel .bar {
+        flex: 1;
+        height: 34px;
+        background: var(--panel-2);
+        border-radius: 8px;
+        overflow: hidden;
+        position: relative;
+      }
+      .funnel .fill {
+        height: 100%;
+        background: linear-gradient(90deg, rgba(181,124,255,0.7), rgba(124,224,255,0.7));
+        border-radius: 8px;
+      }
+      .funnel .num {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        padding: 0 12px;
+        font-size: 13px;
+        font-variant-numeric: tabular-nums;
+        color: #fff;
+      }
+      .funnel .rate {
+        width: 110px;
+        text-align: right;
+        color: var(--muted);
+        font-size: 12px;
+        font-variant-numeric: tabular-nums;
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 13px;
+      }
+      th, td {
+        padding: 10px 12px;
+        text-align: left;
+        border-bottom: 1px solid var(--border);
+        font-variant-numeric: tabular-nums;
+      }
+      th { color: var(--muted); font-weight: 500; }
+      td.mono { font-family: var(--mono); font-size: 12px; }
+      tr:last-child td { border-bottom: none; }
+
+      details {
+        background: var(--panel-2);
+        border-radius: 8px;
+        padding: 4px 10px;
+        margin-top: 4px;
+      }
+      details summary {
+        cursor: pointer;
+        list-style: none;
+        color: var(--muted);
+        font-size: 12px;
+        padding: 4px 0;
+      }
+      pre {
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 8px 10px;
+        overflow-x: auto;
+        font-family: var(--mono);
+        font-size: 11px;
+        margin: 6px 0;
+      }
+
+      .btn {
+        appearance: none;
+        border: 1px solid var(--border);
+        background: var(--panel);
+        color: var(--text);
+        padding: 8px 14px;
+        border-radius: 8px;
+        font-size: 13px;
+        cursor: pointer;
+      }
+      .btn:hover { border-color: var(--accent); }
+      .btn.danger { border-color: rgba(255,124,157,0.4); color: var(--bad); }
+      .btn.danger:hover { background: rgba(255,124,157,0.08); }
+
+      .empty { color: var(--muted); padding: 20px 4px; text-align: center; font-size: 13px; }
+      .loading { color: var(--muted); font-size: 12px; }
+      .err { color: var(--bad); font-size: 12px; }
+
+      .footer { color: var(--muted); font-size: 11px; text-align: center; padding: 24px 0 8px; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div class="brand">
+        <span class="dot"></span>
+        <h1>Magic World · Analytics</h1>
+      </div>
+      <div class="actions">
+        <button id="btn-refresh" class="btn" title="Refresh (r)">↻ Refresh</button>
+        <button id="btn-clear" class="btn danger" title="Delete all events">Clear</button>
+      </div>
+    </header>
+
+    <main>
+      <div class="filters" id="filters">
+        <button class="chip" data-since="24h" aria-pressed="true">Last 24h</button>
+        <button class="chip" data-since="7d">Last 7d</button>
+        <button class="chip" data-since="30d">Last 30d</button>
+        <button class="chip" data-since="all">All time</button>
+      </div>
+
+      <div id="err" class="err" style="display:none"></div>
+
+      <div class="grid" id="kpis">
+        <div class="card"><h3>Paywall views</h3><div class="n" id="k-view">—</div><div class="sub" id="k-view-sub">&nbsp;</div></div>
+        <div class="card"><h3>Checkouts</h3><div class="n" id="k-checkout">—</div><div class="sub" id="k-checkout-sub">&nbsp;</div></div>
+        <div class="card"><h3>Trials</h3><div class="n" id="k-trial">—</div><div class="sub" id="k-trial-sub">&nbsp;</div></div>
+        <div class="card"><h3>Subscribes</h3><div class="n" id="k-sub">—</div><div class="sub" id="k-sub-sub">&nbsp;</div></div>
+      </div>
+
+      <section class="panel">
+        <h2>Funnel</h2>
+        <div class="funnel" id="funnel"></div>
+      </section>
+
+      <section class="panel">
+        <h2>Revenue</h2>
+        <table>
+          <thead><tr><th>Currency</th><th>Purchases</th><th>Total</th></tr></thead>
+          <tbody id="revenue"></tbody>
+        </table>
+        <div class="empty" id="revenue-empty" style="display:none">No paid conversions in this window yet.</div>
+      </section>
+
+      <section class="panel">
+        <h2>Events by type</h2>
+        <table>
+          <thead><tr><th>Event</th><th>Count</th></tr></thead>
+          <tbody id="counts"></tbody>
+        </table>
+        <div class="empty" id="counts-empty" style="display:none">No events in this window.</div>
+      </section>
+
+      <section class="panel">
+        <h2>Recent events (last 100)</h2>
+        <table>
+          <thead><tr><th>Time</th><th>Event</th><th>User</th><th>Platform</th><th>Country</th><th>Value</th></tr></thead>
+          <tbody id="events"></tbody>
+        </table>
+        <div class="empty" id="events-empty" style="display:none">No events in this window.</div>
+      </section>
+
+      <div class="footer" id="footer"></div>
+    </main>
+
+    <script>
+      const TOKEN_KEY = "mw_analytics_token";
+      const SINCE_KEY = "mw_analytics_since";
+
+      function getToken() {
+        let t = localStorage.getItem(TOKEN_KEY);
+        if (!t) {
+          t = prompt("Admin token:");
+          if (t) localStorage.setItem(TOKEN_KEY, t);
+        }
+        return t || "";
+      }
+
+      async function api(path) {
+        const token = getToken();
+        const r = await fetch(path, { headers: { Authorization: "Bearer " + token } });
+        if (r.status === 401) {
+          localStorage.removeItem(TOKEN_KEY);
+          throw new Error("Unauthorized — clear localStorage and try again.");
+        }
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        return r.json();
+      }
+
+      function fmtInt(n) {
+        return Number(n || 0).toLocaleString("pt-BR");
+      }
+      function fmtPct(n) {
+        if (!Number.isFinite(n)) return "0%";
+        return (n * 100).toFixed(1) + "%";
+      }
+      function fmtMoney(v, ccy) {
+        try {
+          return new Intl.NumberFormat("pt-BR", {
+            style: "currency",
+            currency: ccy || "BRL",
+          }).format(Number(v || 0));
+        } catch {
+          return (Number(v || 0)).toFixed(2) + " " + (ccy || "");
+        }
+      }
+      function fmtDate(ms) {
+        const d = new Date(Number(ms));
+        return d.toLocaleString("pt-BR");
+      }
+
+      function currentSince() {
+        return localStorage.getItem(SINCE_KEY) || "24h";
+      }
+
+      function paintFunnel(f) {
+        const el = document.getElementById("funnel");
+        const steps = [
+          ["Paywall view", f.paywall_view, null],
+          ["Checkout initiated", f.checkout_initiated, f.view_to_checkout],
+          ["Start trial", f.start_trial, f.checkout_to_trial],
+          ["Subscribe", f.subscribe, f.trial_to_subscribe],
+        ];
+        const max = Math.max(1, ...steps.map((s) => s[1] || 0));
+        el.innerHTML = steps
+          .map(([label, n, rate]) => {
+            const width = Math.max(2, Math.round(((n || 0) / max) * 100));
+            return (
+              '<div class="step">' +
+              '<div class="label">' + label + "</div>" +
+              '<div class="bar"><div class="fill" style="width:' + width + '%"></div>' +
+              '<div class="num">' + fmtInt(n) + "</div></div>" +
+              '<div class="rate">' + (rate == null ? "" : "step: " + fmtPct(rate)) + "</div>" +
+              "</div>"
+            );
+          })
+          .join("");
+        document.getElementById("k-view").textContent = fmtInt(f.paywall_view);
+        document.getElementById("k-checkout").textContent = fmtInt(f.checkout_initiated);
+        document.getElementById("k-trial").textContent = fmtInt(f.start_trial);
+        document.getElementById("k-sub").textContent = fmtInt(f.subscribe);
+        document.getElementById("k-checkout-sub").textContent =
+          "view → checkout: " + fmtPct(f.view_to_checkout);
+        document.getElementById("k-trial-sub").textContent =
+          "checkout → trial: " + fmtPct(f.checkout_to_trial);
+        document.getElementById("k-sub-sub").textContent =
+          "trial → subscribe: " + fmtPct(f.trial_to_subscribe);
+        document.getElementById("k-view-sub").textContent =
+          "view → subscribe: " + fmtPct(f.view_to_subscribe);
+      }
+
+      function paintRevenue(rows) {
+        const tb = document.getElementById("revenue");
+        const empty = document.getElementById("revenue-empty");
+        if (!rows.length) {
+          tb.innerHTML = "";
+          empty.style.display = "";
+          return;
+        }
+        empty.style.display = "none";
+        tb.innerHTML = rows
+          .map((r) => "<tr><td>" + (r.currency || "unknown") + "</td><td>" + fmtInt(r.purchases) + "</td><td>" + fmtMoney(r.total, r.currency) + "</td></tr>")
+          .join("");
+      }
+
+      function paintCounts(rows) {
+        const tb = document.getElementById("counts");
+        const empty = document.getElementById("counts-empty");
+        if (!rows.length) {
+          tb.innerHTML = "";
+          empty.style.display = "";
+          return;
+        }
+        empty.style.display = "none";
+        tb.innerHTML = rows
+          .map((r) => "<tr><td class=\"mono\">" + r.event + "</td><td>" + fmtInt(r.count) + "</td></tr>")
+          .join("");
+      }
+
+      function paintEvents(rows) {
+        const tb = document.getElementById("events");
+        const empty = document.getElementById("events-empty");
+        if (!rows.length) {
+          tb.innerHTML = "";
+          empty.style.display = "";
+          return;
+        }
+        empty.style.display = "none";
+        tb.innerHTML = rows
+          .map((r) => {
+            const val = r.value == null
+              ? "—"
+              : (r.currency ? fmtMoney(r.value, r.currency) : String(r.value));
+            const params = r.params_json || "{}";
+            const short = (r.user_id || "").slice(0, 8);
+            return (
+              "<tr><td>" + fmtDate(r.ts) + "</td>" +
+              '<td class="mono">' + r.event + "</td>" +
+              "<td>" + (short || "—") + "</td>" +
+              "<td>" + (r.platform || "—") + "</td>" +
+              "<td>" + (r.country || "—") + "</td>" +
+              "<td>" + val + "</td></tr>" +
+              '<tr><td colspan="6"><details><summary>params</summary><pre>' +
+              params.replace(/</g, "&lt;") +
+              "</pre></details></td></tr>"
+            );
+          })
+          .join("");
+      }
+
+      async function refresh() {
+        const err = document.getElementById("err");
+        err.style.display = "none";
+        const s = currentSince();
+        const q = "?since=" + encodeURIComponent(s);
+        try {
+          const [f, rev, counts, events] = await Promise.all([
+            api("/admin/funnel" + q),
+            api("/admin/revenue" + q),
+            api("/admin/counts" + q),
+            api("/admin/events" + q + "&limit=100"),
+          ]);
+          paintFunnel(f.funnel);
+          paintRevenue(rev.revenue);
+          paintCounts(counts.counts);
+          paintEvents(events.events);
+          document.getElementById("footer").textContent =
+            "Last update " + new Date().toLocaleTimeString("pt-BR") +
+            " · " + events.total + " total events" +
+            (f.sinceMs ? " · since " + new Date(f.sinceMs).toLocaleString("pt-BR") : "");
+        } catch (e) {
+          err.style.display = "";
+          err.textContent = String(e.message || e);
+        }
+      }
+
+      function setSince(v) {
+        localStorage.setItem(SINCE_KEY, v);
+        document.querySelectorAll(".chip").forEach((c) => {
+          c.setAttribute("aria-pressed", c.dataset.since === v ? "true" : "false");
+        });
+        refresh();
+      }
+
+      document.getElementById("filters").addEventListener("click", (e) => {
+        const t = e.target;
+        if (t instanceof HTMLElement && t.classList.contains("chip")) {
+          setSince(t.dataset.since || "24h");
+        }
+      });
+      document.getElementById("btn-refresh").addEventListener("click", refresh);
+      document.getElementById("btn-clear").addEventListener("click", async () => {
+        if (!confirm("Delete ALL events? This cannot be undone.")) return;
+        try {
+          const token = getToken();
+          const r = await fetch("/admin/clear?confirm=DELETE_ALL", {
+            method: "DELETE",
+            headers: { Authorization: "Bearer " + token },
+          });
+          if (!r.ok) throw new Error("HTTP " + r.status);
+          await refresh();
+        } catch (e) {
+          alert("Failed: " + (e.message || e));
+        }
+      });
+      document.addEventListener("keydown", (e) => {
+        if (e.key === "r" && !e.metaKey && !e.ctrlKey) refresh();
+      });
+
+      // Boot
+      setSince(currentSince());
+      setInterval(refresh, 30_000);
+    </script>
+  </body>
+</html>
