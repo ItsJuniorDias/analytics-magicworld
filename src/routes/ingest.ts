@@ -93,7 +93,14 @@ export function registerIngest(app: FastifyInstance, db: Db): void {
     return {
       ok: dbOk,
       driver: storageDriver,
-      ephemeral: storageDriver === "sqlite",
+      // O dado vai se perder no proximo restart?
+      //
+      // SQLite so e efemero onde o disco e — num container. Na maquina de
+      // quem desenvolve, ./data/analytics.db persiste como qualquer outro
+      // banco, e chamar aquilo de efemero seria alarme falso. Alarme falso
+      // repetido ensina a ignorar o alarme, e este aqui precisa ser levado
+      // a serio nas poucas vezes em que aparecer.
+      ephemeral: storageDriver === "sqlite" && config.env === "production",
       events,
       env: config.env,
       ts: Date.now(),

@@ -28,11 +28,30 @@ const inList = (xs: readonly string[]): string =>
 export class PgDb implements Db {
   private readonly pool: Pool;
 
+  /**
+   * Postgres gerenciado exige SSL; Postgres na sua maquina nao tem.
+   *
+   * Isto ja foi `url.includes("render.com")`, o que amarrava o backend a um
+   * provedor so — e justamente na hora de sair do Render, que e quando o
+   * banco free expira, a conexao sairia sem SSL e falharia. A pergunta certa
+   * nao e "e Render?", e "e local?".
+   *
+   * `rejectUnauthorized: false` porque Render, Neon e Supabase servem
+   * certificados que nem sempre encadeiam nas raizes que o Node conhece.
+   * Isso protege o trafego mas nao verifica a identidade do servidor;
+   * para um sink de analytics anonimo e a troca aceitavel. Se um dia isto
+   * carregar algo mais sensivel, passe o CA do provedor.
+   */
+  private static sslFor(url: string): false | { rejectUnauthorized: boolean } {
+    if (process.env.PGSSL === "disable") return false;
+    const local = /@(localhost|127\.0\.0\.1|\[::1\])[:/]/.test(url);
+    return local ? false : { rejectUnauthorized: false };
+  }
+
   constructor(url: string) {
     this.pool = new Pool({
       connectionString: url,
-      // Render's managed Postgres requires SSL.
-      ssl: url.includes("render.com") ? { rejectUnauthorized: false } : undefined,
+      ssl: PgDb.sslFor(url),
       max: 10,
     });
   }

@@ -66,7 +66,14 @@ npm run dev
 Abre em `http://localhost:3000`. O dashboard pede o `ADMIN_TOKEN` na primeira
 visita e guarda no `localStorage`.
 
-Sem `DATABASE_URL`, o servidor usa SQLite em `./data/analytics.db`.
+Sem `DATABASE_URL`, o servidor usa SQLite em `./data/analytics.db`. Isso é
+normal e o dado **persiste** — o que é efêmero no Render é o disco do
+container, não o SQLite. Por isso o aviso de armazenamento efêmero no
+dashboard só aparece quando `NODE_ENV=production`.
+
+Para testar com o app iOS apontando para cá, veja `ANALYTICS.md` no projeto do
+app: ligue `sendFromDebugBuilds` e os eventos do simulador caem neste banco em
+vez do de produção.
 `npm run seed` recusa rodar com `NODE_ENV=production` — dado falso entra na
 mesma tabela dos reais e depois não sai.
 

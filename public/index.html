@@ -491,8 +491,11 @@
         const banner = document.getElementById("banner");
         try {
           const h = await (await fetch("/health")).json();
-          el.textContent = h.driver === "postgres" ? "postgres" : "sqlite";
-          el.className = h.driver === "postgres" ? "loading" : "err";
+          el.textContent = h.driver;
+          /* `ephemeral` ja vem decidido do servidor: e sqlite E producao.
+             Em dev o SQLite persiste normalmente, entao nada de vermelho. */
+          el.className = h.ephemeral ? "err" : "loading";
+
           if (h.ephemeral) {
             banner.className = "banner show";
             banner.innerHTML =
