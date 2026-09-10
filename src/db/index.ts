@@ -11,6 +11,7 @@
  */
 
 import { config } from "../config";
+import type { CountryRow } from "../lib/country";
 
 export type EventRow = {
   id: number;
@@ -44,6 +45,7 @@ export type FunnelStats = {
 };
 
 export type CountRow = { event: string; count: number };
+export type { CountryRow };
 export type RevenueRow = {
   currency: string;
   total: number;
@@ -63,6 +65,7 @@ export interface Db {
   funnel(opts: { sinceMs?: number }): Promise<FunnelStats>;
   countsByEvent(opts: { sinceMs?: number }): Promise<CountRow[]>;
   revenue(opts: { sinceMs?: number }): Promise<RevenueRow[]>;
+  countries(opts: { sinceMs?: number }): Promise<CountryRow[]>;
   clearAll(): Promise<void>;
   close(): Promise<void>;
 }

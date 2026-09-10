@@ -12,6 +12,7 @@ import type { FastifyInstance, FastifyRequest } from "fastify";
 
 import { config } from "../config";
 import type { Db } from "../db";
+import { countryFromHeaders } from "../lib/country";
 import { normalize, type IncomingEvent } from "../lib/normalize";
 import { RateLimiter } from "../lib/rateLimit";
 
@@ -48,10 +49,16 @@ export function registerIngest(app: FastifyInstance, db: Db): void {
       return reply.code(413).send({ ok: false, error: "batch_too_large" });
     }
 
+    // Resolved once per request: every event in the batch came over the same
+    // connection, so they all share a country.
+    const edgeCountry = countryFromHeaders(
+      req.headers as Record<string, unknown>,
+    );
+
     let accepted = 0;
     let rejected = 0;
     for (const raw of incoming) {
-      const row = normalize(raw);
+      const row = normalize(raw, { edgeCountry });
       if (!row) {
         rejected += 1;
         continue;

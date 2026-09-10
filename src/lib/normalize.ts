@@ -14,6 +14,7 @@
 
 import { config } from "../config";
 import type { EventInsert } from "../db";
+import { resolveCountry } from "./country";
 
 export type IncomingEvent = {
   event: string;
@@ -54,7 +55,21 @@ const pick = <T,>(
 
 const EVENT_NAME_RE = /^[a-z][a-z0-9_]{0,63}$/i;
 
-export function normalize(raw: IncomingEvent): EventInsert | null {
+/**
+ * Context the request carries but the event body does not.
+ *
+ * `edgeCountry` is what the CDN already resolved from the IP. Passing it in
+ * (instead of reading headers here) keeps normalize a pure function, which is
+ * what makes it testable and reusable from the seed script.
+ */
+export type NormalizeContext = {
+  edgeCountry?: string | null;
+};
+
+export function normalize(
+  raw: IncomingEvent,
+  ctx: NormalizeContext = {},
+): EventInsert | null {
   if (!raw || typeof raw !== "object") return null;
   const event = str(raw.event);
   if (!event || !EVENT_NAME_RE.test(event)) return null;
@@ -75,6 +90,13 @@ export function normalize(raw: IncomingEvent): EventInsert | null {
       ? clientTs
       : nowMs;
 
+  const rawCountry = pick(
+    p,
+    ["country", "country_code", "countryCode", "region"],
+    str,
+  );
+  const locale = pick(p, ["locale", "language", "lang"], str);
+
   return {
     event,
     ts,
@@ -82,8 +104,16 @@ export function normalize(raw: IncomingEvent): EventInsert | null {
     user_id: pick(p, ["user_id", "userId", "app_user_id", "rc_user_id"], str),
     platform: pick(p, ["platform", "os"], str),
     app_version: pick(p, ["app_version", "appVersion", "version"], str),
-    country: pick(p, ["country", "country_code", "countryCode", "region"], str),
-    locale: pick(p, ["locale", "language", "lang"], str),
+    // Normalized to ISO 3166-1 alpha-2 so the column holds one shape only.
+    // Before this, whatever the app happened to send went straight in — which
+    // is fine until "BR", "br" and "pt-BR" become three separate countries
+    // in the same report.
+    country: resolveCountry({
+      param: rawCountry,
+      locale,
+      edge: ctx.edgeCountry ?? null,
+    }),
+    locale,
     currency:
       pick(p, ["currency", "currency_code", "currencyCode"], str) ??
       (event === "subscribe" || event === "start_trial"

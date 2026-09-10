@@ -24,6 +24,7 @@ type SqliteHandle = {
 import { existsSync, mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 
+import { buildCountryRows, type CountryRow } from "../lib/country";
 import type {
   CountRow,
   Db,
@@ -74,6 +75,7 @@ export class SqliteDb implements Db {
       CREATE INDEX IF NOT EXISTS idx_events_received_at ON events(received_at);
       CREATE INDEX IF NOT EXISTS idx_events_session_id ON events(session_id);
       CREATE INDEX IF NOT EXISTS idx_events_user_id ON events(user_id);
+      CREATE INDEX IF NOT EXISTS idx_events_country ON events(country);
     `);
   }
 
@@ -236,6 +238,47 @@ export class SqliteDb implements Db {
       total: Number(r.total ?? 0),
       purchases: Number(r.purchases ?? 0),
     }));
+  }
+
+  /**
+   * Per-country volume and conversion.
+   *
+   * SUM(CASE ...) rather than COUNT(*) FILTER so the SQL is byte-identical
+   * across all three drivers — the funnel and this report can't drift apart
+   * because of a dialect difference.
+   *
+   * Rows with country NULL group together and surface as "Unknown". That is
+   * the truth (edge couldn't resolve it, or the row predates this column
+   * being populated) and is more useful than silently dropping them.
+   */
+  async countries(opts: { sinceMs?: number }): Promise<CountryRow[]> {
+    const args: unknown[] = [];
+    let whereSql = "";
+    if (opts.sinceMs) {
+      whereSql = "WHERE ts >= ?";
+      args.push(opts.sinceMs);
+    }
+    const rows = this.db
+      .prepare(
+        `SELECT country,
+                COUNT(*) AS events,
+                SUM(CASE WHEN event = 'paywall_view' THEN 1 ELSE 0 END) AS paywall_views,
+                SUM(CASE WHEN event = 'start_trial'  THEN 1 ELSE 0 END) AS trials,
+                SUM(CASE WHEN event = 'subscribe'    THEN 1 ELSE 0 END) AS subscribes
+         FROM events
+         ${whereSql}
+         GROUP BY country`,
+      )
+      .all(...args);
+    return buildCountryRows(
+      rows.map((r) => ({
+        country: (r.country as string | null) ?? null,
+        events: Number(r.events ?? 0),
+        paywall_views: Number(r.paywall_views ?? 0),
+        trials: Number(r.trials ?? 0),
+        subscribes: Number(r.subscribes ?? 0),
+      })),
+    );
   }
 
   async clearAll(): Promise<void> {

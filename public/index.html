@@ -186,6 +186,22 @@
       }
       th { color: var(--muted); font-weight: 500; }
       td.mono { font-family: var(--mono); font-size: 12px; }
+
+      /* Countries */
+      .flag {
+        font-size: 18px;
+        line-height: 1;
+        /* Flag fonts vary in width across platforms; a fixed box keeps the
+           country names aligned down the column. */
+        display: inline-block;
+        width: 24px;
+        text-align: center;
+        margin-right: 8px;
+      }
+      td.ccode { color: var(--muted, #8a95a1); font-size: 11px; font-family: var(--mono); }
+      td.rate { font-variant-numeric: tabular-nums; font-weight: 600; }
+      td.rate.dim { opacity: .45; font-weight: 400; }
+      tr.unknown { opacity: .72; }
       tr:last-child td { border-bottom: none; }
 
       details {
@@ -274,6 +290,16 @@
           <tbody id="revenue"></tbody>
         </table>
         <div class="empty" id="revenue-empty" style="display:none">No paid conversions in this window yet.</div>
+      </section>
+
+      <section class="panel">
+        <h2>Countries</h2>
+        <table>
+          <thead><tr><th>Country</th><th>Paywall</th><th>Trials</th><th>Subscribes</th><th>Rate</th></tr></thead>
+          <tbody id="countries"></tbody>
+        </table>
+        <div class="empty" id="countries-empty" style="display:none">No events in this window.</div>
+        <div class="empty" id="countries-note" style="display:none"></div>
       </section>
 
       <section class="panel">
@@ -397,6 +423,62 @@
           .join("");
       }
 
+      // Below this many paywall views a percentage is noise: 1 subscribe out
+      // of 2 views is not "50% conversion", it's two people. Showing "—"
+      // instead keeps a tiny sample from inviting a real decision.
+      var MIN_VIEWS_FOR_RATE = 10;
+
+      function paintCountries(rows) {
+        const tb = document.getElementById("countries");
+        const empty = document.getElementById("countries-empty");
+        const note = document.getElementById("countries-note");
+        if (!rows || !rows.length) {
+          tb.innerHTML = "";
+          note.style.display = "none";
+          empty.style.display = "";
+          return;
+        }
+        empty.style.display = "none";
+        tb.innerHTML = rows
+          .map((r) => {
+            const enough = r.paywall_views >= MIN_VIEWS_FOR_RATE;
+            const rate = enough
+              ? '<td class="rate">' + fmtPct(r.rate) + "</td>"
+              : '<td class="rate dim">—</td>';
+            const code = r.code
+              ? '<span class="ccode">' + esc(r.code) + "</span>"
+              : "";
+            return (
+              '<tr class="' + (r.code ? "" : "unknown") + '">' +
+              "<td>" + '<span class="flag">' + r.flag + "</span>" + esc(r.name) + " " + code + "</td>" +
+              "<td>" + fmtInt(r.paywall_views) + "</td>" +
+              "<td>" + fmtInt(r.trials) + "</td>" +
+              "<td>" + fmtInt(r.subscribes) + "</td>" +
+              rate +
+              "</tr>"
+            );
+          })
+          .join("");
+
+        const unknown = rows.find((r) => !r.code);
+        note.style.display = "";
+        note.textContent =
+          "Rate = subscribes ÷ paywall views. Countries under " +
+          MIN_VIEWS_FOR_RATE +
+          " views show \u2014 (sample too small)." +
+          (unknown
+            ? " \u201CUnknown\u201D is events the edge could not resolve \u2014 VPN, proxy, or rows from before this column was filled."
+            : "");
+      }
+
+      // Names come from Intl on the server, not from user input — but this
+      // builds HTML by concatenation, and escaping is cheaper than trusting.
+      function esc(v) {
+        return String(v == null ? "" : v).replace(/[&<>"']/g, function (ch) {
+          return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch];
+        });
+      }
+
       function paintCounts(rows) {
         const tb = document.getElementById("counts");
         const empty = document.getElementById("counts-empty");
@@ -409,6 +491,17 @@
         tb.innerHTML = rows
           .map((r) => "<tr><td class=\"mono\">" + r.event + "</td><td>" + fmtInt(r.count) + "</td></tr>")
           .join("");
+      }
+
+      // Same code-point arithmetic as the server's flagEmoji. Duplicated here
+      // because /admin/events returns the raw column, not a decorated row.
+      function flagFor(code) {
+        const c = String(code || "").trim().toUpperCase();
+        if (!/^[A-Z]{2}$/.test(c) || c === "XX" || c === "T1") return "🏳️";
+        return String.fromCodePoint(
+          0x1f1e6 + (c.charCodeAt(0) - 65),
+          0x1f1e6 + (c.charCodeAt(1) - 65),
+        );
       }
 
       function paintEvents(rows) {
@@ -432,7 +525,7 @@
               '<td class="mono">' + r.event + "</td>" +
               "<td>" + (short || "—") + "</td>" +
               "<td>" + (r.platform || "—") + "</td>" +
-              "<td>" + (r.country || "—") + "</td>" +
+              "<td>" + (r.country ? flagFor(r.country) + " " + esc(r.country) : "—") + "</td>" +
               "<td>" + val + "</td></tr>" +
               '<tr><td colspan="6"><details><summary>params</summary><pre>' +
               params.replace(/</g, "&lt;") +
@@ -448,15 +541,17 @@
         const s = currentSince();
         const q = "?since=" + encodeURIComponent(s);
         try {
-          const [f, rev, counts, events] = await Promise.all([
+          const [f, rev, counts, countries, events] = await Promise.all([
             api("/admin/funnel" + q),
             api("/admin/revenue" + q),
             api("/admin/counts" + q),
+            api("/admin/countries" + q),
             api("/admin/events" + q + "&limit=100"),
           ]);
           paintFunnel(f.funnel);
           paintRevenue(rev.revenue);
           paintCounts(counts.counts);
+          paintCountries(countries.countries);
           paintEvents(events.events);
           document.getElementById("footer").textContent =
             "Last update " + new Date().toLocaleTimeString("pt-BR") +

@@ -71,6 +71,16 @@ export function registerAdmin(app: FastifyInstance, db: Db): void {
     },
   );
 
+  app.get<{ Querystring: { since?: string } }>(
+    "/admin/countries",
+    async (req, reply) => {
+      if (!requireAuth(req, reply)) return;
+      const sinceMs = parseSince(req.query.since);
+      const countries = await db.countries({ sinceMs });
+      return { ok: true, sinceMs: sinceMs ?? null, countries };
+    },
+  );
+
   app.get<{
     Querystring: {
       since?: string;
