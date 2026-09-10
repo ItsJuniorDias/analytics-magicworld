@@ -475,6 +475,34 @@
           return Number(n).toFixed(2) + " " + cur;
         }
       };
+      /* Codigo ISO 3166-1 alpha-2 -> bandeira.
+         Cada letra vira um regional indicator symbol (A = U+1F1E6); o par
+         de simbolos e que o sistema desenha como bandeira. Nao precisa de
+         tabela de paises nem de imagem: e o proprio codigo, deslocado.
+
+         Codigo que nao for duas letras (inclusive "(desconhecido)") volta
+         vazio, e a celula mostra so o texto. */
+      const flag = (code) => {
+        if (typeof code !== "string" || !/^[A-Za-z]{2}$/.test(code)) return "";
+        return String.fromCodePoint(
+          ...[...code.toUpperCase()].map((c) => 0x1f1e6 + c.charCodeAt(0) - 65),
+        );
+      };
+
+      /* Bandeira E codigo. So a bandeira fica bonito e ilegivel: em tamanho
+         de tabela, metade delas e indistinguivel da outra metade, e o dado
+         que voce tem de verdade e o codigo. */
+      const countryCell = (code) => {
+        const f = flag(code);
+        // Codigo valido sai sempre em caixa alta, venha como vier: a coluna
+        // e uma lista de codigos, e "br" no meio de "US" e "PT" so parece
+        // erro de dado.
+        // `esc` no ramo da bandeira e redundante — o regex de `flag` so
+        // deixa passar duas letras — mas escapar aqui evita que alguem
+        // mexendo no regex depois abra um buraco sem perceber.
+        return f ? f + " " + esc(code.toUpperCase()) : esc(code || "—");
+      };
+
       const esc = (s) =>
         String(s === null || s === undefined ? "" : s).replace(/[&<>"]/g, (c) =>
           ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]),
@@ -559,7 +587,7 @@
             : "";
       }
 
-      function paintSegment(rows, tbodyId, emptyId) {
+      function paintSegment(rows, tbodyId, emptyId, label) {
         const tb = document.getElementById(tbodyId);
         const empty = document.getElementById(emptyId);
         if (!rows || !rows.length) {
@@ -572,7 +600,7 @@
           .slice(0, 20)
           .map(
             (r) =>
-              "<tr><td>" + esc(r.key) + "</td><td>" + fmtInt(r.paywall_view) +
+              "<tr><td>" + (label ? label(r.key) : esc(r.key)) + "</td><td>" + fmtInt(r.paywall_view) +
               "</td><td>" + fmtInt(r.checkout_initiated) + "</td><td>" +
               fmtInt(r.purchase) + "</td><td>" + fmtPct(r.view_to_purchase) + "</td></tr>",
           )
@@ -661,7 +689,7 @@
               "</td><td>" + esc(r.source || "—") +
               '</td><td class="mono">' + esc((r.user_id || "—").slice(0, 8)) +
               '</td><td class="mono">' + esc(r.app_version || "—") +
-              "</td><td>" + esc(r.country || "—") +
+              "</td><td>" + countryCell(r.country) +
               "</td><td>" + val + "</td></tr>"
             );
           })
@@ -685,7 +713,7 @@
           paintFunnel(f.funnel);
           paintRevenue(rev.revenue);
           paintSegment(src.sources, "sources", "sources-empty");
-          paintSegment(ctry.countries, "countries", "countries-empty");
+          paintSegment(ctry.countries, "countries", "countries-empty", countryCell);
           paintCounts(counts.counts);
           paintVersions(ev.events);
           paintEvents(ev.events);
