@@ -14,8 +14,7 @@
     "start:bun": "bun src/server.ts",
     "seed": "tsx scripts/seed.ts",
     "seed:bun": "bun scripts/seed.ts",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
-    "check:dashboard": "node scripts/check-dashboard.mjs"
+    "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
     "fastify": "^5.2.1",

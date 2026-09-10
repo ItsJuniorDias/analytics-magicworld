@@ -1,229 +1,229 @@
-# Magic World — Analytics Backend
+# analytics-magicworld
 
-First-party analytics sink for the Magic World audiobook app. Receives events from `ANALYTICS_ENDPOINT` and shows the pre-purchase funnel that RevenueCat can't see (paywall view → checkout initiated → trial start → subscribe).
+Backend próprio de analytics do app **Magic World** (iOS, SwiftUI, StoreKit 2).
 
-Stack: **Fastify + TypeScript**, **node:sqlite** for local dev (zero native deps), **Postgres** in production. Deploys on Render via `render.yaml` (Blueprint).
+Mede o funil que a App Store não mostra: quantas pessoas **viram** o paywall,
+quantas **abriram a folha de pagamento**, e quantas **concluíram**. A App Store
+só conta a última.
+
+Fastify + Postgres (ou SQLite no desenvolvimento), sem dependências além de
+`fastify` e `pg`.
 
 ---
 
-## Quickstart (local, 30s)
+## Como o funil funciona
 
-### With Node 22.11+ (uses `node:sqlite`)
+```
+app_open
+   │
+paywall_view ──► checkout_initiated ──►┬── start_trial   (anual: 1 semana grátis)
+                                       └── subscribe     (mensal, ou anual sem
+                                                          direito ao período grátis)
+```
+
+Dois pontos que definem tudo o que está abaixo:
+
+**`start_trial` e `subscribe` são irmãos, não uma sequência.** O app emite um
+OU outro no mesmo instante, dependendo de o produto ter período grátis e de a
+pessoa ter direito a ele. Tratar como sequência produz números sem significado:
+dez compras mensais e dez trials anuais no mesmo dia leriam como "100% de
+conversão de trial". Por isso o funil tem três passos, e a divisão entre os dois
+ramos aparece embaixo, sem taxa entre eles.
+
+**O funil conta pessoas, não disparos.** Todos os passos são
+`COUNT(DISTINCT user_id)`. Quem abriu o paywall cinco vezes e não comprou é uma
+pessoa que não comprou, não cinco. O volume bruto de aberturas aparece à parte —
+reabrir muito é sinal de dúvida de preço, e vale ver.
+
+## O que este backend não mede
+
+**A conversão de período grátis para pago.** Ela acontece dias depois, no
+servidor da Apple, com o app fechado. Não é observável daqui.
+
+O app emite `subscription_renewed` quando o StoreKit entrega a transação com o
+app aberto, o que cobre parte dos casos, mas não todos: quem cancela antes do
+fim, ou renova e nunca mais abre o app, não aparece. **Não trate o número de
+renovações como MRR.**
+
+Para medir isso de verdade é preciso
+[App Store Server Notifications v2](https://developer.apple.com/documentation/appstoreservernotifications)
+apontando para um endpoint próprio. Está fora do escopo deste repositório.
+
+Por isso não existe aqui nenhuma taxa `trial → pago`. Um número inventado com
+cara de medição é pior que um espaço em branco.
+
+---
+
+## Rodando na sua máquina
 
 ```bash
+cp .env.example .env      # e edite
 npm install
-cp .env.example .env
-# Optional: edit ADMIN_TOKEN in .env
-npm run seed    # ~14 days of fake data so the dashboard has something to show
-npm run dev     # http://localhost:3000 → dashboard prompts for ADMIN_TOKEN
+npm run seed              # dados falsos, ~14 dias, só pra ver a forma
+npm run dev
 ```
 
-Requires **Node 22.11+** (for the built-in `node:sqlite`). The `.node-version` file pins this so Render picks the right version too.
+Abre em `http://localhost:3000`. O dashboard pede o `ADMIN_TOKEN` na primeira
+visita e guarda no `localStorage`.
 
-### With Bun (uses `bun:sqlite`)
+Sem `DATABASE_URL`, o servidor usa SQLite em `./data/analytics.db`.
+`npm run seed` recusa rodar com `NODE_ENV=production` — dado falso entra na
+mesma tabela dos reais e depois não sai.
 
-```bash
-bun install
-cp .env.example .env
-bun run seed:bun   # ~14 days of fake data (via bun runtime)
-bun run dev:bun    # http://localhost:3000
-```
+## Produção (Render)
 
-The backend detects the runtime at boot and picks the right SQLite driver. **Production on Render always uses Node** (pinned via `.node-version` + `render.yaml`), and once `DATABASE_URL` is set it uses Postgres regardless of runtime.
+O `render.yaml` cria o serviço e o banco juntos e injeta `DATABASE_URL`.
+`ADMIN_TOKEN` é gerado pelo Render (`generateValue`); pegue no painel, aba
+**Environment**. Ele nunca deve existir num arquivo versionado.
 
----
+### Duas armadilhas do plano free
 
-## Wire the app to it
+**O serviço dorme.** Depois de 15 minutos sem tráfego o Render desliga o
+container, e a requisição seguinte espera de 30 a 60 segundos pelo cold start.
+O cliente iOS tem `timeoutInterval = 60` por causa disso. Com 15 segundos —
+como era antes — todo envio que chegasse com o serviço frio morria no timeout, e
+com app de baixo tráfego o serviço está quase sempre frio.
 
-In `lib/analytics.ts` inside the Magic World app, set:
+**O Postgres free expira em 30 dias.** Quando isso acontece, `DATABASE_URL`
+some e o servidor **sobe normalmente** usando SQLite em disco efêmero: aceita
+eventos, responde 202, e apaga tudo no próximo restart. De fora é idêntico a
+"ninguém usou o app".
 
-```ts
-const ANALYTICS_ENDPOINT = "https://<your-render-service>.onrender.com/events";
-```
-
-The client posts either a single event or a batch:
-
-```jsonc
-// single
-{ "event": "paywall_view", "ts": 1755000000000, "params": { ... } }
-
-// batch (max 100 per request)
-{ "events": [ { "event": "...", "ts": 0, "params": {...} }, ... ] }
-```
-
-Response: `202 { ok: true, accepted: N, rejected: M }`.
-
----
-
-## Event schema
-
-Every event has `event` (snake_case, `[a-z0-9_]{1,64}`), an optional `ts` (client-side ms; server falls back to now if missing or absurd), and a `params` bag. We store the full bag as JSON *and* pull well-known fields into indexed columns for the funnel and revenue queries.
-
-### Well-known params (all optional, all indexed)
-
-| snake_case         | camelCase alias    | Column        | Use                                             |
-| ------------------ | ------------------ | ------------- | ----------------------------------------------- |
-| `session_id`       | `sessionId`        | `session_id`  | Group events into a single app session          |
-| `user_id`          | `userId` / `app_user_id` / `rc_user_id` | `user_id` | Anonymous / RevenueCat app user id  |
-| `platform`         | `os`               | `platform`    | `ios` / `android`                               |
-| `app_version`      | `appVersion` / `version` | `app_version` | e.g. `1.4.0`                             |
-| `country`          | `country_code` / `countryCode` / `region` | `country`  | ISO country                        |
-| `locale`           | `language` / `lang`| `locale`      | `pt-BR`, `en-US`, ...                           |
-| `currency`         | `currency_code` / `currencyCode` | `currency` | ISO 4217. Defaults to `BRL` for subscribe/trial |
-| `value` / `price` / `amount` / `revenue` | — | `value` | Purchase amount (numeric)                  |
-| `product_id`       | `productId` / `sku` / `package_identifier` | `product_id` | RevenueCat / App Store product id  |
-
-### Funnel events (must-emit)
-
-These four are what the dashboard funnels on. Emit them from the app exactly.
-
-| Event                 | When                                                          |
-| --------------------- | ------------------------------------------------------------- |
-| `paywall_view`        | Paywall becomes visible (screen mount / becomes focused)      |
-| `checkout_initiated`  | User taps "Subscribe" / "Start free trial" (BEFORE StoreKit)  |
-| `start_trial`         | RevenueCat confirms a trial period started                    |
-| `subscribe`           | RevenueCat confirms an active (paid) entitlement              |
-
-Emit anything else freely (`onboarding_step`, `story_open`, `chapter_finished`, ...) — it goes into the raw events browser and event-count panel, so you can spot friction *before* the paywall.
+Por isso `GET /health` diz qual driver subiu, e o dashboard mostra um aviso no
+topo quando o armazenamento é efêmero. Se você for deixar isto rodando de
+verdade, tire o banco do Render (Neon e Supabase não expiram nem dormem junto
+com o serviço). O serviço web pode continuar dormindo — o cliente espera.
 
 ---
 
 ## Endpoints
 
-Public:
-- `POST /events` — ingest (single or batch). Rate-limited per IP.
-- `GET /health` — returns `{ ok: true, ts }`. Used by Render's health check.
-- `GET /` — the dashboard.
+### `POST /events` — público
 
-Admin (all require `Authorization: Bearer $ADMIN_TOKEN`):
-- `GET /admin/funnel?since=24h|7d|30d|all`
-- `GET /admin/revenue?since=…`
-- `GET /admin/counts?since=…` — events grouped by name
-- `GET /admin/countries?since=…` — volume and conversion per country, with flag and name
-- `GET /admin/events?since=…&event=…&limit=100&offset=0`
-- `DELETE /admin/clear?confirm=DELETE_ALL` — wipes the events table
+Um evento ou um lote. Sempre responde `202` quando aceita, para o cliente nunca
+travar esperando a gravação.
 
-The dashboard prompts for the token on first load and stores it in `localStorage` under `mw_analytics_token`. Clear it from DevTools if you rotate the token.
-
----
-
-## Countries
-
-Every event carries a two-letter country code. The IP is never read, logged, or
-stored.
-
-**Three sources, in priority order:**
-
-1. `params.country` — whatever the app sends. Best signal when it's the
-   storefront country, because that's where the user actually pays, which is
-   not always where they open the app.
-2. `params.locale` — `pt-BR` carries a region, so `BR` is recoverable. Only
-   used when the tag *has* a region subtag.
-3. The edge header — Cloudflare fronts Render and resolves the IP to a country
-   before the request reaches Fastify. `cf-ipcountry` is read; the IP is not.
-
-Source 3 is what makes this work for clients already installed: no app release,
-no waiting for review, results starting on deploy.
-
-**A trap worth knowing about.** A bare `pt` is a *language*, not a country.
-Treating it as one would file every Portuguese-speaking user under Portugal.
-`countryFromLocale` therefore returns `null` for a tag with no region subtag —
-only `pt-BR`, `en_US`, `zh-Hant-TW` and friends resolve.
-
-`XX` (edge couldn't determine) and `T1` (Tor) are discarded rather than stored:
-they look like country codes and would invent a nation in the report.
-
-**The column is now normalized.** It always held a `country`, but whatever the
-app sent went in verbatim — which is fine right up until `BR`, `br` and `pt-BR`
-become three separate countries in the same table. Ingest now folds them to ISO
-3166-1 alpha-2. Rows written before this keep their old value and show up under
-that raw string with a white flag, so nothing is silently lost.
-
-**Flags need no lookup table.** A flag emoji is the two Regional Indicator
-Symbols for the letters of the code, so `BR` → 🇧🇷 is arithmetic over code
-points. Names come from `Intl.DisplayNames`. No new dependency, no list to keep
-up to date.
-
-Rates under 10 paywall views render as `—`: one subscribe out of two views is
-not "50% conversion", it's two people.
-
-```bash
-curl -s "https://YOUR-SERVICE/admin/countries?since=7d" \
-  -H "Authorization: Bearer $ADMIN_TOKEN"
+```json
+{ "events": [
+  { "event": "paywall_view", "ts": 1789000000000,
+    "params": { "user_id": "…", "source": "story_gate", "platform": "ios" } }
+] }
 ```
 
----
+Limites: 100 eventos por requisição, 32 KB de corpo, 240 requisições por minuto
+por IP. Evento com nome fora de `^[a-z][a-z0-9_]{0,63}$` é descartado e contado
+em `rejected`; o lote inteiro não é rejeitado por causa de um item ruim.
 
-## Checking the dashboard before you deploy
+### `GET /health` — público
 
-```bash
-npm run check:dashboard
+O diagnóstico mais rápido que existe aqui. Não pede token: não há nada além de
+um total agregado, e um diagnóstico que exige token é um diagnóstico que você
+não faz do celular.
+
+```json
+{ "ok": true, "driver": "postgres", "ephemeral": false, "events": 4213 }
 ```
 
-`public/index.html` is the only part of this project TypeScript never looks at:
-loose JS inside a `<script>` tag, served as a string by `server.ts`. `npm run
-build` passes, the deploy goes green, and the page can still break silently — a
-syntax error there kills the whole script, so even the `try/catch` in
-`refresh()` never runs and no error banner appears. The symptom is panels that
-stay empty forever.
+`driver: "sqlite"` em produção significa que o dado está indo para um disco que
+some. `ok: false` significa que o servidor está no ar mas não fala com o banco.
 
-The script executes that `<script>` in a `vm` with a fake DOM and a fake
-`fetch`, and fails if any panel renders empty. Run it next to `typecheck`.
+### `/admin/*` — exige `Authorization: Bearer <ADMIN_TOKEN>`
 
----
+| Rota | O que devolve |
+| --- | --- |
+| `GET /admin/funnel` | Passos do funil em pessoas distintas, mais as taxas |
+| `GET /admin/revenue` | Uma linha por moeda, sem conversão cambial |
+| `GET /admin/sources` | Funil recortado por origem do paywall |
+| `GET /admin/countries` | Funil recortado por país |
+| `GET /admin/counts` | Volume por tipo de evento |
+| `GET /admin/events` | Lista crua. `limit` (máx. 500), `offset`, `event` |
+| `DELETE /admin/clear?confirm=DELETE_ALL` | Apaga tudo |
 
-## Deploy on Render (Blueprint, 2 min)
+Todas aceitam `?since=24h` · `7d` · `30d` · `all` · ou um timestamp em ms.
 
-1. Push this repo to GitHub.
-2. On Render: **New +** → **Blueprint** → select the repo.
-3. Render reads `render.yaml`, provisions the web service **and** a free Postgres, wires `DATABASE_URL` into the web service, and generates a random `ADMIN_TOKEN`.
-4. First deploy pins Node 22.11 (`NODE_VERSION` env + `.node-version`).
-5. Open the service URL, enter the `ADMIN_TOKEN` when prompted.
-
-The service auto-switches from `node:sqlite` (local) to Postgres (Render) — no code change. Render's disk is ephemeral, so SQLite would lose data on every redeploy; Postgres persists.
-
----
-
-## Environment variables
-
-See `.env.example` for the complete list. The essentials:
-
-| Var              | Required in prod | Notes                                            |
-| ---------------- | ---------------- | ------------------------------------------------ |
-| `DATABASE_URL`   | ✅ (Render sets)  | If set → Postgres; if empty → local sqlite       |
-| `ADMIN_TOKEN`    | ✅                | Bearer token for `/admin/*` and the dashboard    |
-| `PORT`           | (Render sets)    | Default 3000                                     |
-| `DEFAULT_CURRENCY` | ⛔               | Fallback currency for `subscribe`/`start_trial`, default `BRL` |
-| `CORS_ORIGINS`   | ⛔               | Comma-separated. Empty = allow all               |
-| `INGEST_RATE_PER_MINUTE` | ⛔        | Per-IP token bucket, default 240 rpm             |
-| `MAX_BODY_BYTES` | ⛔               | Ingest body limit, default 32KB                  |
+`sources` e `countries` são agregados sobre o período inteiro, no banco. Não
+monte esses recortes no navegador a partir de `/admin/events`: aquilo devolve no
+máximo 500 linhas, então a tabela sairia de uma amostra das últimas centenas de
+eventos em vez do período escolhido.
 
 ---
 
-## Development
+## Eventos
 
-Node scripts (default):
+| Evento | Quando |
+| --- | --- |
+| `app_open` | Abertura fria do app. **Não** dispara ao voltar do segundo plano |
+| `paywall_view` | O paywall apareceu. Sempre com `source` |
+| `checkout_initiated` | Tocou em assinar, **antes** da folha do StoreKit |
+| `start_trial` | Compra concluída entrando em período grátis. `value` = 0 |
+| `subscribe` | Compra concluída com cobrança imediata |
+| `subscription_renewed` | Renovação que chegou com o app aberto. Ver as ressalvas acima |
 
-```bash
-npm run typecheck   # tsc --noEmit
-npm run dev         # tsx watch, auto-reload
-npm run build       # tsc → dist/
-npm run start       # node dist/src/server.js  (prod entry)
-npm run seed        # populate ~14d of fake events
+`app_open` dispara só na abertura fria porque, ligado a toda volta ao primeiro
+plano, ele contava também Central de Controle, notificação e — principalmente —
+a folha de pagamento do StoreKit, que tira o app do estado ativo e devolve. O
+resultado era um denominador inflado justamente por quem comprou.
+
+### Origens do paywall (`source`)
+
+| Valor | Onde |
+| --- | --- |
+| `intro` | Abre sozinho depois do onboarding |
+| `story_gate` | A pessoa tentou abrir uma história bloqueada |
+| `home` | Botão na Home |
+| `profile` | Botão no Perfil |
+
+Sem isto, o paywall que a pessoa procurou e o paywall que caiu na cara dela
+viram o mesmo número, e `view_to_checkout` fica ilegível. Eventos gravados antes
+da versão 1.5 do app não têm `source` e aparecem como `(desconhecido)`.
+
+### Campos aceitos em `params`
+
+`user_id` · `session_id` · `platform` · `app_version` · `country` · `locale` ·
+`currency` · `value` · `product_id` · `source`
+
+São aceitos em `snake_case` e `camelCase`. O bag inteiro é guardado em
+`params_json`; os campos acima também vão para colunas indexadas. Timestamp de
+cliente mais de 30 dias no futuro ou 365 no passado é substituído pelo horário
+do servidor — relógio de aparelho erra.
+
+---
+
+## Privacidade
+
+`user_id` é um UUID sorteado na primeira execução do app e guardado localmente.
+Não é identificador de aparelho, não segue a pessoa entre apps nem entre
+aparelhos, e some na desinstalação. Ainda assim é dado coletado, e precisa estar
+declarado no rótulo de privacidade da App Store como *Identifiers* e *Product
+Interaction*, ligado a **Analytics** e marcado como **não** usado para
+rastreamento.
+
+Não são enviados: IDFA, nome, e-mail, progresso de leitura ou título de conto.
+Um app de história infantil não precisa saber o que a criança leu para saber se
+o paywall converte. Este backend não tem onde receber essas coisas.
+
+## Estrutura
+
+```
+src/
+  config.ts          env em um lugar só, e qual driver este boot usa
+  server.ts          boot, CORS, dashboard estático
+  db/
+    index.ts         interface Db, tipos, nomes de evento do funil
+    pg.ts            Postgres (produção)
+    sqlite-core.ts   todas as consultas SQLite, uma vez só
+    sqlite.ts        abre node:sqlite
+    sqlite-bun.ts    abre bun:sqlite
+  routes/
+    ingest.ts        POST /events, GET /health
+    admin.ts         /admin/*
+  lib/
+    normalize.ts     params → colunas
+    rateLimit.ts     token bucket em memória, por IP
+public/index.html    dashboard, uma página, sem build
+scripts/seed.ts      dados falsos para desenvolvimento
 ```
 
-Bun scripts (local dev on Bun):
-
-```bash
-bun run dev:bun     # bun --watch, auto-reload
-bun run start:bun   # bun runs src/server.ts directly (no build step)
-bun run seed:bun    # populate ~14d of fake events via bun
-```
-
----
-
-## Notes on scope
-
-- **No PII by design.** The client sends `user_id` (RevenueCat's anonymous id), never emails, phone numbers, or advertising IDs. This backend has no place to receive them.
-- **Single-instance.** Rate limiter is in-memory. If you ever scale horizontally, swap for Redis. Not worth the dep today.
-- **RevenueCat is the source of truth for entitlements.** This backend measures the *pre-purchase* funnel and lets you correlate app-side friction with post-purchase outcomes. Don't gate features on data in this DB.
+Os dois drivers SQLite compartilham `sqlite-core.ts` porque antes eram cópias
+linha a linha um do outro — e a forma mais fácil do funil do desenvolvimento
+divergir do de produção era alguém corrigir uma cópia e esquecer a outra.

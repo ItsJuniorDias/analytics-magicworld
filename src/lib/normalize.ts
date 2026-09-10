@@ -14,7 +14,6 @@
 
 import { config } from "../config";
 import type { EventInsert } from "../db";
-import { resolveCountry } from "./country";
 
 export type IncomingEvent = {
   event: string;
@@ -55,21 +54,10 @@ const pick = <T,>(
 
 const EVENT_NAME_RE = /^[a-z][a-z0-9_]{0,63}$/i;
 
-/**
- * Context the request carries but the event body does not.
- *
- * `edgeCountry` is what the CDN already resolved from the IP. Passing it in
- * (instead of reading headers here) keeps normalize a pure function, which is
- * what makes it testable and reusable from the seed script.
- */
-export type NormalizeContext = {
-  edgeCountry?: string | null;
-};
+/** Eventos em que a moeda faz sentido e pode faltar. */
+const MONETARY = new Set(["subscribe", "start_trial", "subscription_renewed"]);
 
-export function normalize(
-  raw: IncomingEvent,
-  ctx: NormalizeContext = {},
-): EventInsert | null {
+export function normalize(raw: IncomingEvent): EventInsert | null {
   if (!raw || typeof raw !== "object") return null;
   const event = str(raw.event);
   if (!event || !EVENT_NAME_RE.test(event)) return null;
@@ -90,41 +78,24 @@ export function normalize(
       ? clientTs
       : nowMs;
 
-  const rawCountry = pick(
-    p,
-    ["country", "country_code", "countryCode", "region"],
-    str,
-  );
-  const locale = pick(p, ["locale", "language", "lang"], str);
-
   return {
     event,
     ts,
     session_id: pick(p, ["session_id", "sessionId"], str),
-    user_id: pick(p, ["user_id", "userId", "app_user_id", "rc_user_id"], str),
+    user_id: pick(p, ["user_id", "userId", "app_user_id", "install_id"], str),
     platform: pick(p, ["platform", "os"], str),
     app_version: pick(p, ["app_version", "appVersion", "version"], str),
-    // Normalized to ISO 3166-1 alpha-2 so the column holds one shape only.
-    // Before this, whatever the app happened to send went straight in — which
-    // is fine until "BR", "br" and "pt-BR" become three separate countries
-    // in the same report.
-    country: resolveCountry({
-      param: rawCountry,
-      locale,
-      edge: ctx.edgeCountry ?? null,
-    }),
-    locale,
+    country: pick(p, ["country", "country_code", "countryCode", "region"], str),
+    locale: pick(p, ["locale", "language", "lang"], str),
     currency:
       pick(p, ["currency", "currency_code", "currencyCode"], str) ??
-      (event === "subscribe" || event === "start_trial"
-        ? config.defaultCurrency
-        : null),
+      (MONETARY.has(event) ? config.defaultCurrency : null),
     value: pick(p, ["value", "price", "amount", "revenue"], num),
-    product_id: pick(
-      p,
-      ["product_id", "productId", "sku", "package_identifier", "packageIdentifier"],
-      str,
-    ),
+    product_id: pick(p, ["product_id", "productId", "sku"], str),
+    // O que levou a pessoa ao paywall. So o cliente sabe: a tela de historia
+    // bloqueada e o paywall que abre sozinho depois do onboarding sao coisas
+    // muito diferentes, e sem isto os dois viram o mesmo numero.
+    source: pick(p, ["source", "trigger", "origin"], str),
     params_json: JSON.stringify(p),
   };
 }

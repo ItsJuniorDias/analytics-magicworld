@@ -8,6 +8,8 @@
  *   ?since=24h  ?since=7d  ?since=30d  ?since=all
  */
 
+import { timingSafeEqual } from "node:crypto";
+
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 
 import { config } from "../config";
@@ -26,14 +28,21 @@ function parseSince(s: unknown): number | undefined {
   return Number.isFinite(n) ? n : undefined;
 }
 
+/** Comparacao em tempo constante, pra nao vazar o token byte a byte. */
+function tokenMatches(given: string, expected: string): boolean {
+  const a = Buffer.from(given);
+  const b = Buffer.from(expected);
+  if (a.length !== b.length) return false;
+  return timingSafeEqual(a, b);
+}
+
 function requireAuth(req: FastifyRequest, reply: FastifyReply): boolean {
   if (!config.adminToken) {
     reply.code(500).send({ ok: false, error: "admin_token_not_configured" });
     return false;
   }
   const h = req.headers.authorization || "";
-  const expected = `Bearer ${config.adminToken}`;
-  if (h !== expected) {
+  if (!tokenMatches(h, `Bearer ${config.adminToken}`)) {
     reply.code(401).send({ ok: false, error: "unauthorized" });
     return false;
   }
@@ -71,12 +80,26 @@ export function registerAdmin(app: FastifyInstance, db: Db): void {
     },
   );
 
+  // Agregados de verdade, sobre o periodo inteiro. O dashboard nao deve
+  // montar isto no navegador a partir de /admin/events: aquilo devolve no
+  // maximo 500 linhas, entao a "tabela por pais" sairia de uma amostra das
+  // ultimas centenas de linhas em vez do periodo escolhido.
+  app.get<{ Querystring: { since?: string } }>(
+    "/admin/sources",
+    async (req, reply) => {
+      if (!requireAuth(req, reply)) return;
+      const sinceMs = parseSince(req.query.since);
+      const sources = await db.bySource({ sinceMs });
+      return { ok: true, sinceMs: sinceMs ?? null, sources };
+    },
+  );
+
   app.get<{ Querystring: { since?: string } }>(
     "/admin/countries",
     async (req, reply) => {
       if (!requireAuth(req, reply)) return;
       const sinceMs = parseSince(req.query.since);
-      const countries = await db.countries({ sinceMs });
+      const countries = await db.byCountry({ sinceMs });
       return { ok: true, sinceMs: sinceMs ?? null, countries };
     },
   );

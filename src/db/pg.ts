@@ -7,15 +7,23 @@
 
 import { Pool } from "pg";
 
-import { buildCountryRows, type CountryRow } from "../lib/country";
-import type {
-  CountRow,
-  Db,
-  EventInsert,
-  EventRow,
-  FunnelStats,
-  RevenueRow,
+import {
+  PAID_EVENTS,
+  PURCHASE_EVENTS,
+  type CountRow,
+  type Db,
+  type EventInsert,
+  type EventRow,
+  type FunnelStats,
+  type RevenueRow,
+  type SegmentRow,
 } from "./index";
+
+const rate = (num: number, den: number): number => (den > 0 ? num / den : 0);
+
+/** `'a','b'` pronto pra interpolar num IN (...). Lista fechada em codigo. */
+const inList = (xs: readonly string[]): string =>
+  xs.map((s) => `'${s}'`).join(",");
 
 export class PgDb implements Db {
   private readonly pool: Pool;
@@ -52,16 +60,26 @@ export class PgDb implements Db {
       CREATE INDEX IF NOT EXISTS idx_events_received_at ON events(received_at);
       CREATE INDEX IF NOT EXISTS idx_events_session_id ON events(session_id);
       CREATE INDEX IF NOT EXISTS idx_events_user_id ON events(user_id);
-      CREATE INDEX IF NOT EXISTS idx_events_country ON events(country);
     `);
+
+    // Migracao: `source` foi adicionado depois. Tabelas criadas antes disto
+    // nao tem a coluna, e CREATE TABLE IF NOT EXISTS nao adiciona nada a uma
+    // tabela que ja existe. Linhas antigas ficam com NULL, que o dashboard
+    // mostra como "desconhecido" — dado velho nao vira dado novo.
+    await this.pool.query(
+      `ALTER TABLE events ADD COLUMN IF NOT EXISTS source TEXT`,
+    );
+    await this.pool.query(
+      `CREATE INDEX IF NOT EXISTS idx_events_source ON events(source)`,
+    );
   }
 
   async insertEvent(row: EventInsert): Promise<void> {
     await this.pool.query(
       `INSERT INTO events
         (event, ts, received_at, session_id, user_id, platform, app_version,
-         country, locale, currency, value, product_id, params_json)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+         country, locale, currency, value, product_id, source, params_json)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
       [
         row.event,
         row.ts,
@@ -75,6 +93,7 @@ export class PgDb implements Db {
         row.currency,
         row.value,
         row.product_id,
+        row.source,
         row.params_json,
       ],
     );
@@ -101,7 +120,8 @@ export class PgDb implements Db {
     args.push(opts.offset);
     const res = await this.pool.query(
       `SELECT id, event, ts, received_at, session_id, user_id, platform,
-              app_version, country, locale, currency, value, product_id, params_json
+              app_version, country, locale, currency, value, product_id,
+              source, params_json
        FROM events
        ${whereSql}
        ORDER BY ts DESC
@@ -133,6 +153,11 @@ export class PgDb implements Db {
     return Number(res.rows[0]?.n ?? 0);
   }
 
+  /**
+   * COUNT(DISTINCT user_id) em cada passo. Eventos sem `user_id` ficam de
+   * fora da contagem de pessoas — nao ha como atribui-los a ninguem, e
+   * chutar seria pior que omitir.
+   */
   async funnel(opts: { sinceMs?: number }): Promise<FunnelStats> {
     const args: unknown[] = [];
     let whereSql = "";
@@ -142,35 +167,32 @@ export class PgDb implements Db {
     }
     const res = await this.pool.query(
       `SELECT
-         SUM(CASE WHEN event = 'paywall_view' THEN 1 ELSE 0 END)::bigint AS paywall_view,
-         SUM(CASE WHEN event = 'checkout_initiated' THEN 1 ELSE 0 END)::bigint AS checkout_initiated,
-         SUM(CASE WHEN event = 'start_trial' THEN 1 ELSE 0 END)::bigint AS start_trial,
-         SUM(CASE WHEN event = 'subscribe' THEN 1 ELSE 0 END)::bigint AS subscribe
+         COUNT(DISTINCT CASE WHEN event = 'paywall_view' THEN user_id END)::bigint AS v_users,
+         COUNT(DISTINCT CASE WHEN event = 'checkout_initiated' THEN user_id END)::bigint AS c_users,
+         COUNT(DISTINCT CASE WHEN event IN (${inList(PURCHASE_EVENTS)}) THEN user_id END)::bigint AS p_users,
+         COUNT(DISTINCT CASE WHEN event = 'start_trial' THEN user_id END)::bigint AS t_users,
+         COUNT(DISTINCT CASE WHEN event = 'subscribe' THEN user_id END)::bigint AS s_users,
+         SUM(CASE WHEN event = 'paywall_view' THEN 1 ELSE 0 END)::bigint AS v_events,
+         SUM(CASE WHEN event = 'checkout_initiated' THEN 1 ELSE 0 END)::bigint AS c_events
        FROM events
        ${whereSql}`,
       args,
     );
-    const row = res.rows[0] as {
-      paywall_view: string | null;
-      checkout_initiated: string | null;
-      start_trial: string | null;
-      subscribe: string | null;
-    };
-    const v = Number(row?.paywall_view ?? 0);
-    const c = Number(row?.checkout_initiated ?? 0);
-    const t = Number(row?.start_trial ?? 0);
-    const s = Number(row?.subscribe ?? 0);
-    const rate = (num: number, den: number): number =>
-      den > 0 ? num / den : 0;
+    const r = res.rows[0] ?? {};
+    const v = Number(r.v_users ?? 0);
+    const c = Number(r.c_users ?? 0);
+    const p = Number(r.p_users ?? 0);
     return {
       paywall_view: v,
       checkout_initiated: c,
-      start_trial: t,
-      subscribe: s,
+      purchase: p,
+      trial_started: Number(r.t_users ?? 0),
+      paid_now: Number(r.s_users ?? 0),
+      paywall_view_events: Number(r.v_events ?? 0),
+      checkout_initiated_events: Number(r.c_events ?? 0),
       view_to_checkout: rate(c, v),
-      checkout_to_trial: rate(t, c),
-      trial_to_subscribe: rate(s, t),
-      view_to_subscribe: rate(s, v),
+      checkout_to_purchase: rate(p, c),
+      view_to_purchase: rate(p, v),
     };
   }
 
@@ -195,9 +217,18 @@ export class PgDb implements Db {
     }));
   }
 
+  /**
+   * So dinheiro que ja entrou: compra paga na hora e renovacao.
+   * Trial iniciado nao e receita — vira receita dias depois, num evento que
+   * este backend so ve se o app estiver aberto quando a Apple avisar.
+   *
+   * Sem conversao cambial de proposito: uma linha por moeda. Somar BRL com
+   * USD numa cifra so exige uma cotacao e uma data, e um numero errado com
+   * cara de certo e pior que duas linhas.
+   */
   async revenue(opts: { sinceMs?: number }): Promise<RevenueRow[]> {
     const args: unknown[] = [];
-    let whereSql = "WHERE event = 'subscribe' AND value IS NOT NULL";
+    let whereSql = `WHERE event IN (${inList(PAID_EVENTS)}) AND value IS NOT NULL`;
     if (opts.sinceMs) {
       args.push(opts.sinceMs);
       whereSql += ` AND ts >= $${args.length}`;
@@ -206,7 +237,8 @@ export class PgDb implements Db {
       `SELECT COALESCE(currency,'') AS currency, SUM(value) AS total, COUNT(*)::bigint AS purchases
        FROM events
        ${whereSql}
-       GROUP BY currency`,
+       GROUP BY currency
+       ORDER BY total DESC`,
       args,
     );
     return res.rows.map((r) => ({
@@ -216,44 +248,62 @@ export class PgDb implements Db {
     }));
   }
 
-  /**
-   * Per-country volume and conversion.
-   *
-   * SUM(CASE ...) rather than COUNT(*) FILTER so the SQL is byte-identical
-   * across all three drivers — the funnel and this report can't drift apart
-   * because of a dialect difference.
-   *
-   * Rows with country NULL group together and surface as "Unknown". That is
-   * the truth (edge couldn't resolve it, or the row predates this column
-   * being populated) and is more useful than silently dropping them.
-   */
-  async countries(opts: { sinceMs?: number }): Promise<CountryRow[]> {
+  private async segment(
+    column: "source" | "country",
+    opts: { sinceMs?: number },
+  ): Promise<SegmentRow[]> {
     const args: unknown[] = [];
     let whereSql = "";
     if (opts.sinceMs) {
       args.push(opts.sinceMs);
-      whereSql = `WHERE ts >= $${args.length}`;
+      whereSql = "WHERE ts >= $1";
     }
+    // `source` so existe em paywall_view. Pra saber quantos DESSE grupo
+    // seguiram adiante, propagamos a origem por usuario com uma window
+    // function, senao checkout e compra cairiam todos em "desconhecido".
     const res = await this.pool.query(
-      `SELECT country,
-                COUNT(*) AS events,
-                SUM(CASE WHEN event = 'paywall_view' THEN 1 ELSE 0 END) AS paywall_views,
-                SUM(CASE WHEN event = 'start_trial'  THEN 1 ELSE 0 END) AS trials,
-                SUM(CASE WHEN event = 'subscribe'    THEN 1 ELSE 0 END) AS subscribes
+      `WITH tagged AS (
+         SELECT
+           event,
+           user_id,
+           COALESCE(
+             MAX(${column}) OVER (PARTITION BY user_id),
+             '(desconhecido)'
+           ) AS k
          FROM events
          ${whereSql}
-         GROUP BY country`,
+       )
+       SELECT
+         k,
+         COUNT(DISTINCT CASE WHEN event = 'paywall_view' THEN user_id END)::bigint AS v,
+         COUNT(DISTINCT CASE WHEN event = 'checkout_initiated' THEN user_id END)::bigint AS c,
+         COUNT(DISTINCT CASE WHEN event IN (${inList(PURCHASE_EVENTS)}) THEN user_id END)::bigint AS p
+       FROM tagged
+       GROUP BY k
+       ORDER BY v DESC`,
       args,
     );
-    return buildCountryRows(
-      res.rows.map((r) => ({
-        country: (r.country as string | null) ?? null,
-        events: Number(r.events ?? 0),
-        paywall_views: Number(r.paywall_views ?? 0),
-        trials: Number(r.trials ?? 0),
-        subscribes: Number(r.subscribes ?? 0),
-      })),
-    );
+    return res.rows
+      .map((r) => {
+        const v = Number(r.v ?? 0);
+        const p = Number(r.p ?? 0);
+        return {
+          key: r.k as string,
+          paywall_view: v,
+          checkout_initiated: Number(r.c ?? 0),
+          purchase: p,
+          view_to_purchase: rate(p, v),
+        };
+      })
+      .filter((r) => r.paywall_view > 0 || r.purchase > 0);
+  }
+
+  bySource(opts: { sinceMs?: number }): Promise<SegmentRow[]> {
+    return this.segment("source", opts);
+  }
+
+  byCountry(opts: { sinceMs?: number }): Promise<SegmentRow[]> {
+    return this.segment("country", opts);
   }
 
   async clearAll(): Promise<void> {

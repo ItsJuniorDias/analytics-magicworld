@@ -33,7 +33,22 @@ export const config = {
 
   // Product identity — used only for display/logging, never for gating.
   appName: "Magic World",
-  appBundleId: "com.magicworld.audiobooks",
+  appBundleId: "com.alexandre.juniort10.magicworld",
 } as const;
+
+/**
+ * Qual driver de armazenamento este boot vai usar.
+ *
+ * Isto existe porque a diferenca entre os dois e invisivel de fora e muda
+ * tudo: em Postgres o dado sobrevive; em SQLite no Render ele mora num disco
+ * efemero e some a cada spin-down e a cada deploy. Um dashboard vazio pode
+ * ser "ninguem usou o app" ou "o banco evaporou ontem", e sem isto exposto
+ * nao ha como saber qual dos dois.
+ *
+ * Aparece no log de boot e em GET /health.
+ */
+export const storageDriver: "postgres" | "sqlite" = config.databaseUrl
+  ? "postgres"
+  : "sqlite";
 
 export type Config = typeof config;
