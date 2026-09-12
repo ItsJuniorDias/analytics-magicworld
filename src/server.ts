@@ -3,7 +3,7 @@
  *
  * Responsibilities:
  *   • trustProxy so req.ip is the client behind Render's proxy
- *   • CORS if CORS_ORIGINS is set (the iOS client doesn't need it)
+ *   • CORS if CORS_ORIGINS is set (mobile client doesn't need it)
  *   • Static dashboard at /
  *   • Ingest route at POST /events, admin routes at /admin/*
  *   • Graceful shutdown so in-flight writes are not truncated
@@ -14,9 +14,10 @@ import { join } from "node:path";
 
 import Fastify from "fastify";
 
-import { config, storageDriver } from "./config";
+import { config } from "./config";
 import { makeDb } from "./db";
 import { registerAdmin } from "./routes/admin";
+import { registerAppleNotifications } from "./routes/appleNotifications";
 import { registerIngest } from "./routes/ingest";
 
 async function main(): Promise<void> {
@@ -26,61 +27,44 @@ async function main(): Promise<void> {
     bodyLimit: config.maxBodyBytes,
   });
 
-  // CORS minimo, inline pra evitar mais uma dependencia. O cliente iOS nao
-  // manda Origin (URLSession), entao nada disto afeta a ingestao.
-  //
-  // `/admin/*` nunca recebe `*`: sao rotas com token, e liberar qualquer
-  // origem a le-las significa que qualquer pagina que o navegador abrir pode
-  // fazer a leitura se conseguir o token de algum jeito. Sem CORS_ORIGINS
-  // configurado, o dashboard continua funcionando porque e servido pela
-  // mesma origem — requisicao de mesma origem nao passa por CORS.
+  // Minimal CORS. We inline it to avoid a plugin dependency; the mobile
+  // client sends no Origin header (React Native fetch), so this only matters
+  // if you ever call /events from a browser.
   app.addHook("onRequest", async (req, reply) => {
     const origin = req.headers.origin;
-    const isAdmin = req.url.startsWith("/admin");
-    const listed =
-      typeof origin === "string" && config.corsOrigins.includes(origin);
-
-    if (isAdmin) {
-      if (listed) {
-        reply.header("Access-Control-Allow-Origin", origin as string);
-        reply.header("Vary", "Origin");
-        reply.header("Access-Control-Allow-Methods", "GET,DELETE,OPTIONS");
-        reply.header("Access-Control-Allow-Headers", "Content-Type,Authorization");
-      }
-    } else if (config.corsOrigins.length === 0 || listed) {
+    const allowed =
+      config.corsOrigins.length === 0 ||
+      (typeof origin === "string" && config.corsOrigins.includes(origin));
+    if (allowed) {
+      const allowValue =
+        config.corsOrigins.length === 0 ? "*" : (origin as string);
+      reply.header("Access-Control-Allow-Origin", allowValue);
+      reply.header("Access-Control-Allow-Methods", "GET,POST,DELETE,OPTIONS");
       reply.header(
-        "Access-Control-Allow-Origin",
-        config.corsOrigins.length === 0 ? "*" : (origin as string),
+        "Access-Control-Allow-Headers",
+        "Content-Type,Authorization",
       );
-      if (config.corsOrigins.length > 0) reply.header("Vary", "Origin");
-      reply.header("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
-      reply.header("Access-Control-Allow-Headers", "Content-Type");
     }
-
     if (req.method === "OPTIONS") {
       reply.code(204).send();
     }
   });
 
   const db = await makeDb();
-
-  // Esta linha e o primeiro lugar pra olhar quando o dashboard estiver
-  // vazio. "sqlite" em producao quer dizer que DATABASE_URL nao chegou e o
-  // dado esta indo pro disco efemero do container — some no proximo
-  // spin-down. O mesmo aparece em GET /health, sem precisar do log.
-  app.log.info({ driver: storageDriver }, "storage initialized");
-  if (storageDriver === "sqlite" && config.env === "production") {
-    app.log.warn(
-      "DATABASE_URL ausente em producao: gravando em SQLite efemero, " +
-        "os eventos serao perdidos no proximo restart",
-    );
-  }
+  app.log.info(
+    { driver: config.databaseUrl ? "postgres" : "sqlite" },
+    "storage initialized",
+  );
 
   registerIngest(app, db);
   registerAdmin(app, db);
+  // Apple's webhook. Deliberately outside the ingest rate limiter: Apple
+  // bursts retries when it thinks you did not receive something, and a 429
+  // from us would create exactly the data loss this endpoint exists to stop.
+  await registerAppleNotifications(app, db);
 
   // Serve the dashboard. We load the file once at boot and cache the bytes —
-  // small (~20KB), no reason to hit disk on every request.
+  // small (~15KB), no reason to hit disk on every request.
   //
   // Look in a few plausible spots so both `tsx src/server.ts` (dev) and
   // `node dist/src/server.js` (prod) work without a copy step in the build.

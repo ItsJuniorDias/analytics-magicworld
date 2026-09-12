@@ -231,62 +231,6 @@
       .err { color: var(--bad); font-size: 12px; }
 
       .footer { color: var(--muted); font-size: 11px; text-align: center; padding: 24px 0 8px; }
-
-      /* Aviso de armazenamento efemero. Fica no topo porque, quando ele
-         aparece, todo numero abaixo dele e passageiro. */
-      .banner {
-        display: none;
-        border: 1px solid rgba(255,203,124,0.4);
-        background: rgba(255,203,124,0.08);
-        color: var(--warn);
-        border-radius: 12px;
-        padding: 12px 16px;
-        font-size: 13px;
-        line-height: 1.5;
-        margin-bottom: 20px;
-      }
-      .banner.show { display: block; }
-      .banner strong { color: #ffe0ad; }
-
-      .split {
-        display: flex;
-        gap: 10px;
-        margin-top: 14px;
-        padding-top: 14px;
-        border-top: 1px solid var(--border);
-        flex-wrap: wrap;
-      }
-      .split .leg {
-        flex: 1;
-        min-width: 160px;
-        background: var(--panel-2);
-        border-radius: 10px;
-        padding: 12px 14px;
-      }
-      .split .leg .k {
-        font-size: 12px;
-        color: var(--muted);
-        margin-bottom: 4px;
-      }
-      .split .leg .v {
-        font-size: 20px;
-        font-weight: 600;
-        font-variant-numeric: tabular-nums;
-      }
-      .split .leg .d { font-size: 11px; color: var(--muted); margin-top: 4px; line-height: 1.45; }
-
-      .note {
-        color: var(--muted);
-        font-size: 12px;
-        line-height: 1.55;
-        margin: 12px 0 0;
-      }
-      .two {
-        display: grid;
-        gap: 20px;
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-      }
-      @media (max-width: 900px) { .two { grid-template-columns: 1fr; } }
     </style>
   </head>
   <body>
@@ -296,150 +240,72 @@
         <h1>Magic World · Analytics</h1>
       </div>
       <div class="actions">
-        <span id="health" class="loading"></span>
-        <button id="btn-refresh" class="btn" title="Atualizar (r)">↻ Atualizar</button>
-        <button id="btn-clear" class="btn danger" title="Apagar todos os eventos">Apagar tudo</button>
+        <button id="btn-refresh" class="btn" title="Refresh (r)">↻ Refresh</button>
+        <button id="btn-clear" class="btn danger" title="Delete all events">Clear</button>
       </div>
     </header>
 
     <main>
-      <div class="banner" id="banner"></div>
-
       <div class="filters" id="filters">
-        <button class="chip" data-since="24h" aria-pressed="true">24 horas</button>
-        <button class="chip" data-since="7d" aria-pressed="false">7 dias</button>
-        <button class="chip" data-since="30d" aria-pressed="false">30 dias</button>
-        <button class="chip" data-since="all" aria-pressed="false">Tudo</button>
-        <span id="status" class="loading" style="align-self:center"></span>
+        <button class="chip" data-since="24h" aria-pressed="true">Last 24h</button>
+        <button class="chip" data-since="7d">Last 7d</button>
+        <button class="chip" data-since="30d">Last 30d</button>
+        <button class="chip" data-since="all">All time</button>
       </div>
 
-      <div class="grid">
-        <div class="card">
-          <h3>Viram o paywall</h3>
-          <div class="n" id="k-view">—</div>
-          <div class="sub" id="k-view-sub">&nbsp;</div>
-        </div>
-        <div class="card">
-          <h3>Foram ao pagamento</h3>
-          <div class="n" id="k-checkout">—</div>
-          <div class="sub" id="k-checkout-sub">&nbsp;</div>
-        </div>
-        <div class="card">
-          <h3>Concluíram</h3>
-          <div class="n" id="k-purchase">—</div>
-          <div class="sub" id="k-purchase-sub">&nbsp;</div>
-        </div>
-        <div class="card">
-          <h3>Receita confirmada</h3>
-          <div class="n" id="k-rev">—</div>
-          <div class="sub" id="k-rev-sub">&nbsp;</div>
-        </div>
+      <div id="err" class="err" style="display:none"></div>
+
+      <div class="grid" id="kpis">
+        <div class="card"><h3>Paywall views</h3><div class="n" id="k-view">—</div><div class="sub" id="k-view-sub">&nbsp;</div></div>
+        <div class="card"><h3>Checkouts</h3><div class="n" id="k-checkout">—</div><div class="sub" id="k-checkout-sub">&nbsp;</div></div>
+        <div class="card"><h3>Trials</h3><div class="n" id="k-trial">—</div><div class="sub" id="k-trial-sub">&nbsp;</div></div>
+        <div class="card"><h3>Subscribes</h3><div class="n" id="k-sub">—</div><div class="sub" id="k-sub-sub">&nbsp;</div></div>
       </div>
 
       <section class="panel">
-        <h2>Funil</h2>
+        <h2>Funnel</h2>
         <div class="funnel" id="funnel"></div>
-
-        <div class="split">
-          <div class="leg">
-            <div class="k">Entraram no período grátis</div>
-            <div class="v" id="leg-trial">—</div>
-            <div class="d">Anual. Ainda não pagaram nada.</div>
-          </div>
-          <div class="leg">
-            <div class="k">Pagaram na hora</div>
-            <div class="v" id="leg-paid">—</div>
-            <div class="d">Mensal, ou anual sem direito ao período grátis.</div>
-          </div>
-        </div>
-
-        <p class="note" id="funnel-note"></p>
       </section>
 
-      <div class="two">
-        <section class="panel">
-          <h2>Por onde abriram o paywall</h2>
-          <table>
-            <thead>
-              <tr><th>Origem</th><th>Viram</th><th>Pagamento</th><th>Concluíram</th><th>Taxa</th></tr>
-            </thead>
-            <tbody id="sources"></tbody>
-          </table>
-          <div class="empty" id="sources-empty" style="display:none">
-            Nenhum evento com origem ainda. Versões do app anteriores à 1.5 não mandavam esse campo.
-          </div>
-        </section>
-
-        <section class="panel">
-          <h2>Por país</h2>
-          <table>
-            <thead>
-              <tr><th>País</th><th>Viram</th><th>Pagamento</th><th>Concluíram</th><th>Taxa</th></tr>
-            </thead>
-            <tbody id="countries"></tbody>
-          </table>
-          <div class="empty" id="countries-empty" style="display:none">Nenhum evento neste período.</div>
-        </section>
-      </div>
+      <section class="panel">
+        <h2>Subscriptions · what Apple confirms</h2>
+        <div id="subs-empty" class="empty" style="display:none"></div>
+        <div class="grid" id="subs-kpis"></div>
+        <table id="subs-table" style="margin-top:14px">
+          <thead><tr><th>In this window</th><th>Count</th></tr></thead>
+          <tbody id="subs-rows"></tbody>
+        </table>
+        <div class="empty" id="subs-note" style="display:none"></div>
+      </section>
 
       <section class="panel">
-        <h2>Receita</h2>
+        <h2>Revenue</h2>
         <table>
-          <thead>
-            <tr><th>Moeda</th><th>Cobranças</th><th>Total</th></tr>
-          </thead>
+          <thead><tr><th>Currency</th><th>Purchases</th><th>Total</th></tr></thead>
           <tbody id="revenue"></tbody>
         </table>
-        <div class="empty" id="revenue-empty" style="display:none">
-          Nenhuma cobrança confirmada neste período. Períodos grátis em andamento não aparecem aqui — eles só viram receita quando a Apple cobra.
-        </div>
-        <p class="note">
-          Uma linha por moeda, sem conversão. Não inclui renovações que aconteceram
-          com o app fechado; veja a nota no fim da página.
-        </p>
+        <div class="empty" id="revenue-empty" style="display:none">No paid conversions in this window yet.</div>
       </section>
-
-      <div class="two">
-        <section class="panel">
-          <h2>Eventos por tipo</h2>
-          <table>
-            <thead><tr><th>Evento</th><th>Total</th></tr></thead>
-            <tbody id="counts"></tbody>
-          </table>
-          <div class="empty" id="counts-empty" style="display:none">Nenhum evento neste período.</div>
-        </section>
-
-        <section class="panel">
-          <h2>Versões do app</h2>
-          <table>
-            <thead><tr><th>Versão</th><th>Eventos</th></tr></thead>
-            <tbody id="versions"></tbody>
-          </table>
-          <div class="empty" id="versions-empty" style="display:none">Nenhum evento neste período.</div>
-        </section>
-      </div>
 
       <section class="panel">
-        <h2>Últimos eventos</h2>
+        <h2>Events by type</h2>
         <table>
-          <thead>
-            <tr><th>Quando</th><th>Evento</th><th>Origem</th><th>Pessoa</th><th>Versão</th><th>País</th><th>Valor</th></tr>
-          </thead>
-          <tbody id="events"></tbody>
+          <thead><tr><th>Event</th><th>Count</th></tr></thead>
+          <tbody id="counts"></tbody>
         </table>
-        <div class="empty" id="events-empty" style="display:none">Nenhum evento neste período.</div>
+        <div class="empty" id="counts-empty" style="display:none">No events in this window.</div>
       </section>
 
-      <p class="note">
-        O funil conta <strong>pessoas distintas</strong>, não disparos: quem abriu o paywall
-        cinco vezes e não comprou é uma pessoa que não comprou.
-        Não existe aqui uma taxa de período grátis → pago. Essa conversão acontece dias
-        depois, no servidor da Apple, e este backend só a registra se o app estiver
-        aberto na hora em que a Apple avisar. Para medi-la de verdade é preciso
-        App Store Server Notifications v2.
-      </p>
+      <section class="panel">
+        <h2>Recent events (last 100)</h2>
+        <table>
+          <thead><tr><th>Time</th><th>Event</th><th>User</th><th>Platform</th><th>Country</th><th>Value</th></tr></thead>
+          <tbody id="events"></tbody>
+        </table>
+        <div class="empty" id="events-empty" style="display:none">No events in this window.</div>
+      </section>
 
-      <div class="footer">Magic World · analytics próprio</div>
+      <div class="footer" id="footer"></div>
     </main>
 
     <script>
@@ -449,10 +315,10 @@
       function getToken() {
         let t = localStorage.getItem(TOKEN_KEY);
         if (!t) {
-          t = prompt("Token do dashboard:");
+          t = prompt("Admin token:");
           if (t) localStorage.setItem(TOKEN_KEY, t);
         }
-        return t;
+        return t || "";
       }
 
       async function api(path) {
@@ -460,315 +326,271 @@
         const r = await fetch(path, { headers: { Authorization: "Bearer " + token } });
         if (r.status === 401) {
           localStorage.removeItem(TOKEN_KEY);
-          throw new Error("Token recusado. Recarregue a página e informe outro.");
+          throw new Error("Unauthorized — clear localStorage and try again.");
         }
-        if (!r.ok) throw new Error("Falha em " + path + " (" + r.status + ")");
+        if (!r.ok) throw new Error("HTTP " + r.status);
         return r.json();
       }
 
-      const fmtInt = (n) => (n === null || n === undefined ? "—" : Number(n).toLocaleString("pt-BR"));
-      const fmtPct = (r) => (r === null || r === undefined ? "—" : (Number(r) * 100).toFixed(1) + "%");
-      const fmtMoney = (n, cur) => {
+      function fmtInt(n) {
+        return Number(n || 0).toLocaleString("pt-BR");
+      }
+      function fmtPct(n) {
+        if (!Number.isFinite(n)) return "0%";
+        return (n * 100).toFixed(1) + "%";
+      }
+      function fmtMoney(v, ccy) {
         try {
-          return Number(n).toLocaleString("pt-BR", { style: "currency", currency: cur });
+          return new Intl.NumberFormat("pt-BR", {
+            style: "currency",
+            currency: ccy || "BRL",
+          }).format(Number(v || 0));
         } catch {
-          return Number(n).toFixed(2) + " " + cur;
+          return (Number(v || 0)).toFixed(2) + " " + (ccy || "");
         }
-      };
-      /* Codigo ISO 3166-1 alpha-2 -> bandeira.
-         Cada letra vira um regional indicator symbol (A = U+1F1E6); o par
-         de simbolos e que o sistema desenha como bandeira. Nao precisa de
-         tabela de paises nem de imagem: e o proprio codigo, deslocado.
-
-         Codigo que nao for duas letras (inclusive "(desconhecido)") volta
-         vazio, e a celula mostra so o texto. */
-      const flag = (code) => {
-        if (typeof code !== "string" || !/^[A-Za-z]{2}$/.test(code)) return "";
-        return String.fromCodePoint(
-          ...[...code.toUpperCase()].map((c) => 0x1f1e6 + c.charCodeAt(0) - 65),
-        );
-      };
-
-      /* Bandeira E codigo. So a bandeira fica bonito e ilegivel: em tamanho
-         de tabela, metade delas e indistinguivel da outra metade, e o dado
-         que voce tem de verdade e o codigo. */
-      const countryCell = (code) => {
-        const f = flag(code);
-        // Codigo valido sai sempre em caixa alta, venha como vier: a coluna
-        // e uma lista de codigos, e "br" no meio de "US" e "PT" so parece
-        // erro de dado.
-        // `esc` no ramo da bandeira e redundante — o regex de `flag` so
-        // deixa passar duas letras — mas escapar aqui evita que alguem
-        // mexendo no regex depois abra um buraco sem perceber.
-        return f ? f + " " + esc(code.toUpperCase()) : esc(code || "—");
-      };
-
-      const esc = (s) =>
-        String(s === null || s === undefined ? "" : s).replace(/[&<>"]/g, (c) =>
-          ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]),
-        );
+      }
+      function fmtDate(ms) {
+        const d = new Date(Number(ms));
+        return d.toLocaleString("pt-BR");
+      }
 
       function currentSince() {
         return localStorage.getItem(SINCE_KEY) || "24h";
       }
 
-      /* Health nao precisa de token. E o unico jeito de descobrir, sem abrir o
-         painel do Render, que o backend esta gravando num disco que some. */
-      async function paintHealth() {
-        const el = document.getElementById("health");
-        const banner = document.getElementById("banner");
-        try {
-          const h = await (await fetch("/health")).json();
-          el.textContent = h.driver;
-          /* `ephemeral` ja vem decidido do servidor: e sqlite E producao.
-             Em dev o SQLite persiste normalmente, entao nada de vermelho. */
-          el.className = h.ephemeral ? "err" : "loading";
-
-          if (h.ephemeral) {
-            banner.className = "banner show";
-            banner.innerHTML =
-              "<strong>O banco não está guardando nada.</strong> Este servidor subiu em SQLite, " +
-              "num disco que o Render apaga a cada restart e a cada deploy. " +
-              "Defina <code>DATABASE_URL</code> e reinicie o serviço — os eventos já gravados não voltam.";
-          } else {
-            banner.className = "banner";
-          }
-          if (!h.ok) {
-            banner.className = "banner show";
-            banner.innerHTML =
-              "<strong>O servidor está no ar, mas não consegue falar com o banco.</strong> " +
-              "Os eventos que chegarem agora vão se perder. Verifique o banco no painel do Render.";
-          }
-        } catch {
-          el.textContent = "";
-        }
-      }
-
       function paintFunnel(f) {
         const el = document.getElementById("funnel");
         const steps = [
-          ["Viram o paywall", f.paywall_view, null],
-          ["Foram ao pagamento", f.checkout_initiated, f.view_to_checkout],
-          ["Concluíram", f.purchase, f.checkout_to_purchase],
+          ["Paywall view", f.paywall_view, null],
+          ["Checkout initiated", f.checkout_initiated, f.view_to_checkout],
+          ["Start trial", f.start_trial, f.checkout_to_trial],
+          ["Subscribe", f.subscribe, f.trial_to_subscribe],
         ];
-        const max = Math.max(1, f.paywall_view);
+        const max = Math.max(1, ...steps.map((s) => s[1] || 0));
         el.innerHTML = steps
           .map(([label, n, rate]) => {
-            const w = Math.max(0, Math.min(100, (n / max) * 100));
+            const width = Math.max(2, Math.round(((n || 0) / max) * 100));
             return (
               '<div class="step">' +
-              '<div class="label">' + esc(label) + "</div>" +
-              '<div class="bar"><div class="fill" style="width:' + w + '%"></div>' +
-              '<div class="num">' + fmtInt(n) + " pessoas</div></div>" +
-              '<div class="rate">' + (rate === null ? "" : fmtPct(rate) + " do passo anterior") + "</div>" +
+              '<div class="label">' + label + "</div>" +
+              '<div class="bar"><div class="fill" style="width:' + width + '%"></div>' +
+              '<div class="num">' + fmtInt(n) + "</div></div>" +
+              '<div class="rate">' + (rate == null ? "" : "step: " + fmtPct(rate)) + "</div>" +
               "</div>"
             );
           })
           .join("");
-
-        document.getElementById("leg-trial").textContent = fmtInt(f.trial_started);
-        document.getElementById("leg-paid").textContent = fmtInt(f.paid_now);
-
         document.getElementById("k-view").textContent = fmtInt(f.paywall_view);
         document.getElementById("k-checkout").textContent = fmtInt(f.checkout_initiated);
-        document.getElementById("k-purchase").textContent = fmtInt(f.purchase);
-        document.getElementById("k-view-sub").textContent =
-          fmtInt(f.paywall_view_events) + " aberturas no total";
+        document.getElementById("k-trial").textContent = fmtInt(f.start_trial);
+        document.getElementById("k-sub").textContent = fmtInt(f.subscribe);
         document.getElementById("k-checkout-sub").textContent =
-          fmtPct(f.view_to_checkout) + " de quem viu";
-        document.getElementById("k-purchase-sub").textContent =
-          fmtPct(f.view_to_purchase) + " de quem viu";
-
-        const reopens = f.paywall_view > 0 ? f.paywall_view_events / f.paywall_view : 0;
-        document.getElementById("funnel-note").textContent =
-          reopens >= 1.6
-            ? "Em média cada pessoa abriu o paywall " + reopens.toFixed(1) +
-              " vezes. Reabrir muito costuma ser dúvida de preço ou de plano, não desinteresse."
-            : "";
-      }
-
-      function paintSegment(rows, tbodyId, emptyId, label) {
-        const tb = document.getElementById(tbodyId);
-        const empty = document.getElementById(emptyId);
-        if (!rows || !rows.length) {
-          tb.innerHTML = "";
-          empty.style.display = "block";
-          return;
-        }
-        empty.style.display = "none";
-        tb.innerHTML = rows
-          .slice(0, 20)
-          .map(
-            (r) =>
-              "<tr><td>" + (label ? label(r.key) : esc(r.key)) + "</td><td>" + fmtInt(r.paywall_view) +
-              "</td><td>" + fmtInt(r.checkout_initiated) + "</td><td>" +
-              fmtInt(r.purchase) + "</td><td>" + fmtPct(r.view_to_purchase) + "</td></tr>",
-          )
-          .join("");
+          "view → checkout: " + fmtPct(f.view_to_checkout);
+        document.getElementById("k-trial-sub").textContent =
+          "checkout → trial: " + fmtPct(f.checkout_to_trial);
+        document.getElementById("k-sub-sub").textContent =
+          "trial → subscribe: " + fmtPct(f.trial_to_subscribe);
+        document.getElementById("k-view-sub").textContent =
+          "view → subscribe: " + fmtPct(f.view_to_subscribe);
       }
 
       function paintRevenue(rows) {
         const tb = document.getElementById("revenue");
         const empty = document.getElementById("revenue-empty");
-        if (!rows || !rows.length) {
+        if (!rows.length) {
           tb.innerHTML = "";
-          empty.style.display = "block";
-          document.getElementById("k-rev").textContent = "—";
-          document.getElementById("k-rev-sub").textContent = "\u00a0";
+          empty.style.display = "";
           return;
         }
         empty.style.display = "none";
         tb.innerHTML = rows
-          .map(
-            (r) =>
-              "<tr><td>" + esc(r.currency) + "</td><td>" + fmtInt(r.purchases) +
-              "</td><td>" + fmtMoney(r.total, r.currency) + "</td></tr>",
-          )
+          .map((r) => "<tr><td>" + (r.currency || "unknown") + "</td><td>" + fmtInt(r.purchases) + "</td><td>" + fmtMoney(r.total, r.currency) + "</td></tr>")
           .join("");
-        const top = rows[0];
-        document.getElementById("k-rev").textContent = fmtMoney(top.total, top.currency);
-        document.getElementById("k-rev-sub").textContent =
-          rows.length > 1 ? "+ " + (rows.length - 1) + " outra(s) moeda(s)" : "\u00a0";
+      }
+
+      // Subscription block. These numbers come from Apple's webhook, not from
+      // the app — they are the only ones that know about cancellation, renewal
+      // and refund.
+      //
+      // Kept SEPARATE from the Revenue table on purpose: the same sale emits a
+      // `subscribe` from the app and a `sub_started` from Apple. Adding both
+      // would double everything. The app measures the funnel up to the button;
+      // Apple measures what survived after it.
+      function paintSubs(s) {
+        const empty = document.getElementById("subs-empty");
+        const kpis = document.getElementById("subs-kpis");
+        const table = document.getElementById("subs-table");
+        const note = document.getElementById("subs-note");
+        if (!s) return;
+
+        const p = s.period || {};
+        const total = Object.values(p).reduce((a, b) => a + (b || 0), 0);
+        if (total === 0 && !s.now.active && !s.now.trialing) {
+          // Zero here is almost never "nobody cancelled" — it is the webhook
+          // not configured yet. Saying so prevents the worst possible reading
+          // of this dashboard.
+          empty.style.display = "";
+          empty.innerHTML =
+            "No notifications from Apple yet. Set the Production Server URL " +
+            "in <b>App Store Connect → App Information → App Store Server " +
+            'Notifications</b> (Version 2) pointing at <code>/apple/notifications</code>, ' +
+            "then run <code>npm run apple:test</code> to confirm delivery.";
+          kpis.innerHTML = "";
+          table.style.display = "none";
+          note.style.display = "none";
+          return;
+        }
+        empty.style.display = "none";
+        table.style.display = "";
+
+        const rev = (s.revenue || []).slice().sort((a, b) => b.net - a.net);
+        const top = rev[0];
+        const netStr = top ? fmtMoney(top.net, top.currency) : "—";
+        const netLabel = rev.length > 1 ? "Net (" + top.currency + " +" + (rev.length - 1) + ")" : "Net";
+        const refunds = rev.reduce((a, r) => a + r.refunds, 0);
+
+        const card = (n, label, sub) =>
+          '<div class="card"><h3>' + label + '</h3><div class="n">' + n +
+          '</div><div class="sub">' + (sub || "&nbsp;") + "</div></div>";
+
+        kpis.innerHTML =
+          card(fmtInt(s.now.active), "Paying now", "snapshot, not the window") +
+          card(fmtInt(s.now.trialing), "In trial", "still deciding") +
+          card(fmtInt(p.sub_cancelled), "Cancellations", "turned renewal off") +
+          card(fmtInt(s.now.cancelPending), "Still have access", "cancelled, not expired — win-back window") +
+          card(fmtPct(s.rates.trial_conversion), "Trial → paid", "among trials that already ended") +
+          card(netStr, netLabel, refunds ? refunds + " refund(s) deducted" : "confirmed by Apple");
+
+        const row = (label, n) =>
+          "<tr><td>" + label + "</td><td>" + fmtInt(n) + "</td></tr>";
+        document.getElementById("subs-rows").innerHTML =
+          row("Trials started", p.sub_trial_started) +
+          row("Direct subscriptions", (p.sub_started || 0) + (p.sub_resubscribed || 0)) +
+          row("Renewals charged", p.sub_renewed) +
+          row("Trials that became payments", p.sub_trial_converted) +
+          row("Cancelled during trial", p.sub_trial_cancelled) +
+          row("Cancelled while paying", (p.sub_cancelled || 0) - (p.sub_trial_cancelled || 0)) +
+          row("Changed their mind", p.sub_reactivated) +
+          row("Access ended", p.sub_expired) +
+          row("Billing failures", p.sub_billing_issue) +
+          row("Refunds", p.sub_refunded);
+
+        note.style.display = "";
+        note.innerHTML =
+          "Cancelling is not expiring: whoever cancels keeps access until the " +
+          "end of the paid period. The gap between those two rows is your " +
+          "win-back window.";
       }
 
       function paintCounts(rows) {
         const tb = document.getElementById("counts");
         const empty = document.getElementById("counts-empty");
-        if (!rows || !rows.length) {
-          tb.innerHTML = "";
-          empty.style.display = "block";
-          return;
-        }
-        empty.style.display = "none";
-        tb.innerHTML = rows
-          .map((r) => '<tr><td class="mono">' + esc(r.event) + "</td><td>" + fmtInt(r.count) + "</td></tr>")
-          .join("");
-      }
-
-      /* Versoes: montada no navegador a partir dos ultimos eventos, de
-         proposito. Serve pra achar TestFlight (sufixo -beta) misturado com
-         producao, e pra isso uma amostra recente basta. Os cortes que
-         precisam do periodo inteiro tem endpoint proprio. */
-      function paintVersions(events) {
-        const tb = document.getElementById("versions");
-        const empty = document.getElementById("versions-empty");
-        const tally = {};
-        for (const e of events || []) {
-          const k = e.app_version || "(sem versão)";
-          tally[k] = (tally[k] || 0) + 1;
-        }
-        const rows = Object.entries(tally).sort((a, b) => b[1] - a[1]);
         if (!rows.length) {
           tb.innerHTML = "";
-          empty.style.display = "block";
+          empty.style.display = "";
           return;
         }
         empty.style.display = "none";
         tb.innerHTML = rows
-          .map(([v, n]) => '<tr><td class="mono">' + esc(v) + "</td><td>" + fmtInt(n) + "</td></tr>")
+          .map((r) => "<tr><td class=\"mono\">" + r.event + "</td><td>" + fmtInt(r.count) + "</td></tr>")
           .join("");
       }
 
       function paintEvents(rows) {
         const tb = document.getElementById("events");
         const empty = document.getElementById("events-empty");
-        if (!rows || !rows.length) {
+        if (!rows.length) {
           tb.innerHTML = "";
-          empty.style.display = "block";
+          empty.style.display = "";
           return;
         }
         empty.style.display = "none";
         tb.innerHTML = rows
           .map((r) => {
-            const when = new Date(Number(r.ts)).toLocaleString("pt-BR");
-            const val = r.value === null || r.value === undefined
+            const val = r.value == null
               ? "—"
-              : fmtMoney(r.value, r.currency || "BRL");
+              : (r.currency ? fmtMoney(r.value, r.currency) : String(r.value));
+            const params = r.params_json || "{}";
+            const short = (r.user_id || "").slice(0, 8);
             return (
-              "<tr><td>" + esc(when) + '</td><td class="mono">' + esc(r.event) +
-              "</td><td>" + esc(r.source || "—") +
-              '</td><td class="mono">' + esc((r.user_id || "—").slice(0, 8)) +
-              '</td><td class="mono">' + esc(r.app_version || "—") +
-              "</td><td>" + countryCell(r.country) +
-              "</td><td>" + val + "</td></tr>"
+              "<tr><td>" + fmtDate(r.ts) + "</td>" +
+              '<td class="mono">' + r.event + "</td>" +
+              "<td>" + (short || "—") + "</td>" +
+              "<td>" + (r.platform || "—") + "</td>" +
+              "<td>" + (r.country || "—") + "</td>" +
+              "<td>" + val + "</td></tr>" +
+              '<tr><td colspan="6"><details><summary>params</summary><pre>' +
+              params.replace(/</g, "&lt;") +
+              "</pre></details></td></tr>"
             );
           })
           .join("");
       }
 
-      async function load() {
-        const status = document.getElementById("status");
-        status.className = "loading";
-        status.textContent = "carregando…";
-        const q = "?since=" + encodeURIComponent(currentSince());
+      async function refresh() {
+        const err = document.getElementById("err");
+        err.style.display = "none";
+        const s = currentSince();
+        const q = "?since=" + encodeURIComponent(s);
         try {
-          const [f, rev, src, ctry, counts, ev] = await Promise.all([
+          const [f, rev, counts, events, subs] = await Promise.all([
             api("/admin/funnel" + q),
             api("/admin/revenue" + q),
-            api("/admin/sources" + q),
-            api("/admin/countries" + q),
             api("/admin/counts" + q),
             api("/admin/events" + q + "&limit=100"),
+            api("/admin/subscriptions" + q),
           ]);
           paintFunnel(f.funnel);
+          paintSubs(subs.subscriptions);
           paintRevenue(rev.revenue);
-          paintSegment(src.sources, "sources", "sources-empty");
-          paintSegment(ctry.countries, "countries", "countries-empty", countryCell);
           paintCounts(counts.counts);
-          paintVersions(ev.events);
-          paintEvents(ev.events);
-          status.textContent = "atualizado " + new Date().toLocaleTimeString("pt-BR");
-        } catch (err) {
-          status.className = "err";
-          status.textContent = err.message;
+          paintEvents(events.events);
+          document.getElementById("footer").textContent =
+            "Last update " + new Date().toLocaleTimeString("pt-BR") +
+            " · " + events.total + " total events" +
+            (f.sinceMs ? " · since " + new Date(f.sinceMs).toLocaleString("pt-BR") : "");
+        } catch (e) {
+          err.style.display = "";
+          err.textContent = String(e.message || e);
         }
       }
 
-      document.getElementById("filters").addEventListener("click", (e) => {
-        const btn = e.target.closest(".chip");
-        if (!btn) return;
-        const v = btn.dataset.since;
+      function setSince(v) {
         localStorage.setItem(SINCE_KEY, v);
-        document.querySelectorAll("#filters .chip").forEach((c) => {
-          c.setAttribute("aria-pressed", String(c.dataset.since === v));
+        document.querySelectorAll(".chip").forEach((c) => {
+          c.setAttribute("aria-pressed", c.dataset.since === v ? "true" : "false");
         });
-        load();
-      });
+        refresh();
+      }
 
-      document.getElementById("btn-refresh").addEventListener("click", () => {
-        paintHealth();
-        load();
-      });
-
-      document.addEventListener("keydown", (e) => {
-        if (e.key === "r" && !e.metaKey && !e.ctrlKey && e.target === document.body) {
-          paintHealth();
-          load();
+      document.getElementById("filters").addEventListener("click", (e) => {
+        const t = e.target;
+        if (t instanceof HTMLElement && t.classList.contains("chip")) {
+          setSince(t.dataset.since || "24h");
         }
       });
-
+      document.getElementById("btn-refresh").addEventListener("click", refresh);
       document.getElementById("btn-clear").addEventListener("click", async () => {
-        if (!confirm("Apagar TODOS os eventos? Não tem volta.")) return;
+        if (!confirm("Delete ALL events? This cannot be undone.")) return;
         try {
           const token = getToken();
           const r = await fetch("/admin/clear?confirm=DELETE_ALL", {
             method: "DELETE",
             headers: { Authorization: "Bearer " + token },
           });
-          if (!r.ok) throw new Error("Falha ao apagar (" + r.status + ")");
-          load();
-        } catch (err) {
-          const status = document.getElementById("status");
-          status.className = "err";
-          status.textContent = err.message;
+          if (!r.ok) throw new Error("HTTP " + r.status);
+          await refresh();
+        } catch (e) {
+          alert("Failed: " + (e.message || e));
         }
       });
-
-      document.querySelectorAll("#filters .chip").forEach((c) => {
-        c.setAttribute("aria-pressed", String(c.dataset.since === currentSince()));
+      document.addEventListener("keydown", (e) => {
+        if (e.key === "r" && !e.metaKey && !e.ctrlKey) refresh();
       });
-      paintHealth();
-      load();
+
+      // Boot
+      setSince(currentSince());
+      setInterval(refresh, 30_000);
     </script>
   </body>
 </html>

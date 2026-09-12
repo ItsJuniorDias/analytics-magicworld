@@ -10,7 +10,7 @@
 
 import type { FastifyInstance, FastifyRequest } from "fastify";
 
-import { config, storageDriver } from "../config";
+import { config } from "../config";
 import type { Db } from "../db";
 import { normalize, type IncomingEvent } from "../lib/normalize";
 import { RateLimiter } from "../lib/rateLimit";
@@ -68,42 +68,6 @@ export function registerIngest(app: FastifyInstance, db: Db): void {
     return reply.code(202).send({ ok: true, accepted, rejected });
   });
 
-  /**
-   * Health probe do Render, e o diagnostico mais rapido que existe aqui.
-   *
-   * `driver` e `events` respondem a pergunta que um dashboard vazio nao
-   * responde: nao chegou evento nenhum, ou chegou e o banco sumiu? Se
-   * `driver` vier "sqlite" em producao, o dado esta indo pra um disco
-   * efemero e evapora no proximo spin-down.
-   *
-   * Sem token de proposito: nao ha nada aqui alem de um total agregado, e
-   * um diagnostico que exige token e um diagnostico que voce nao faz do
-   * celular as onze da noite.
-   */
-  app.get("/health", async () => {
-    let events: number | null = null;
-    let dbOk = true;
-    try {
-      events = await db.countEvents({});
-    } catch {
-      // O servidor pode subir e servir o dashboard com o banco fora do ar.
-      // Melhor dizer isso do que devolver 200 limpo e deixar procurar.
-      dbOk = false;
-    }
-    return {
-      ok: dbOk,
-      driver: storageDriver,
-      // O dado vai se perder no proximo restart?
-      //
-      // SQLite so e efemero onde o disco e — num container. Na maquina de
-      // quem desenvolve, ./data/analytics.db persiste como qualquer outro
-      // banco, e chamar aquilo de efemero seria alarme falso. Alarme falso
-      // repetido ensina a ignorar o alarme, e este aqui precisa ser levado
-      // a serio nas poucas vezes em que aparecer.
-      ephemeral: storageDriver === "sqlite" && config.env === "production",
-      events,
-      env: config.env,
-      ts: Date.now(),
-    };
-  });
+  // Simple health probe for Render.
+  app.get("/health", async () => ({ ok: true, ts: Date.now() }));
 }
