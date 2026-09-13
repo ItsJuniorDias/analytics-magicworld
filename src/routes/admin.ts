@@ -61,23 +61,6 @@ export function registerAdmin(app: FastifyInstance, db: Db): void {
     },
   );
 
-  // Subscription lifecycle, sourced from Apple's webhook.
-  //
-  // Kept apart from /admin/revenue on purpose: the SAME sale produces a
-  // `subscribe` from the app and a `sub_started` from Apple. Adding both
-  // doubles revenue. The numbers here are Apple's — the only ones that know
-  // about renewal, cancellation and refund; the ones there are the app's,
-  // which sees the funnel up to the purchase button and nothing after it.
-  app.get<{ Querystring: { since?: string } }>(
-    "/admin/subscriptions",
-    async (req, reply) => {
-      if (!requireAuth(req, reply)) return;
-      const sinceMs = parseSince(req.query.since);
-      const subscriptions = await db.subscriptionStats({ sinceMs });
-      return { ok: true, sinceMs: sinceMs ?? null, subscriptions };
-    },
-  );
-
   app.get<{ Querystring: { since?: string } }>(
     "/admin/revenue",
     async (req, reply) => {

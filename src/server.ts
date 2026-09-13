@@ -17,7 +17,6 @@ import Fastify from "fastify";
 import { config } from "./config";
 import { makeDb } from "./db";
 import { registerAdmin } from "./routes/admin";
-import { registerAppleNotifications } from "./routes/appleNotifications";
 import { registerIngest } from "./routes/ingest";
 
 async function main(): Promise<void> {
@@ -58,10 +57,6 @@ async function main(): Promise<void> {
 
   registerIngest(app, db);
   registerAdmin(app, db);
-  // Apple's webhook. Deliberately outside the ingest rate limiter: Apple
-  // bursts retries when it thinks you did not receive something, and a 429
-  // from us would create exactly the data loss this endpoint exists to stop.
-  await registerAppleNotifications(app, db);
 
   // Serve the dashboard. We load the file once at boot and cache the bytes —
   // small (~15KB), no reason to hit disk on every request.

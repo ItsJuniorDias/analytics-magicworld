@@ -188,6 +188,16 @@
       td.mono { font-family: var(--mono); font-size: 12px; }
       tr:last-child td { border-bottom: none; }
 
+      td.country { white-space: nowrap; }
+      .flag {
+        margin-right: 7px;
+        font-size: 15px;
+        line-height: 1;
+        /* Windows não tem glifo de bandeira no Segoe UI Emoji: cai no
+           bloco de duas letras (🇧🇷 → "BR"), que continua legível. */
+        font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif;
+      }
+
       details {
         background: var(--panel-2);
         border-radius: 8px;
@@ -268,17 +278,6 @@
       </section>
 
       <section class="panel">
-        <h2>Subscriptions · what Apple confirms</h2>
-        <div id="subs-empty" class="empty" style="display:none"></div>
-        <div class="grid" id="subs-kpis"></div>
-        <table id="subs-table" style="margin-top:14px">
-          <thead><tr><th>In this window</th><th>Count</th></tr></thead>
-          <tbody id="subs-rows"></tbody>
-        </table>
-        <div class="empty" id="subs-note" style="display:none"></div>
-      </section>
-
-      <section class="panel">
         <h2>Revenue</h2>
         <table>
           <thead><tr><th>Currency</th><th>Purchases</th><th>Total</th></tr></thead>
@@ -354,6 +353,89 @@
         return d.toLocaleString("pt-BR");
       }
 
+      // Escapa texto vindo do cliente antes de injetar no HTML da tabela.
+      // params_json, country, platform etc. são campos abertos do app —
+      // sem isso, um evento malformado consegue injetar markup no dashboard.
+      function esc(v) {
+        return String(v == null ? "" : v)
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;");
+      }
+
+      // ——— País → bandeira ————————————————————————————————
+      // O normalizador do backend aceita country / country_code / region,
+      // então aqui chega de tudo: "BR", "br", "BRA", "pt-BR", "en_US".
+      // Reduzimos tudo a ISO 3166-1 alpha-2 antes de virar emoji.
+
+      const ISO3_TO_ISO2 = {
+        BRA: "BR", USA: "US", GBR: "GB", PRT: "PT", ESP: "ES", MEX: "MX",
+        FRA: "FR", DEU: "DE", ITA: "IT", ARG: "AR", CHL: "CL", COL: "CO",
+        PER: "PE", URY: "UY", PRY: "PY", BOL: "BO", CAN: "CA", AUS: "AU",
+        NZL: "NZ", JPN: "JP", KOR: "KR", CHN: "CN", IND: "IN", NLD: "NL",
+        BEL: "BE", CHE: "CH", AUT: "AT", SWE: "SE", NOR: "NO", DNK: "DK",
+        FIN: "FI", IRL: "IE", POL: "PL", RUS: "RU", TUR: "TR", ZAF: "ZA",
+        AGO: "AO", MOZ: "MZ", CPV: "CV", ISR: "IL", ARE: "AE", SAU: "SA",
+      };
+      const CC_ALIASES = { UK: "GB", EL: "GR" };
+      // Pseudo-regiões do CLDR: o Intl dá nome a elas ("Região desconhecida"),
+      // mas não existe bandeira — ficariam como duas letras soltas.
+      const CC_BLOCKED = new Set(["ZZ", "QO", "XA", "XB"]);
+
+      const regionNames = (() => {
+        try {
+          return new Intl.DisplayNames(["pt-BR"], { type: "region" });
+        } catch {
+          return null; // navegador antigo: seguimos sem o nome no tooltip
+        }
+      })();
+
+      function countryCode(raw) {
+        if (!raw) return "";
+        let s = String(raw).trim().toUpperCase().replace(/_/g, "-");
+        if (s.includes("-")) s = s.split("-").pop(); // "pt-BR" → "BR"
+        if (CC_ALIASES[s]) return CC_ALIASES[s];
+        if (ISO3_TO_ISO2[s]) return ISO3_TO_ISO2[s];
+        if (CC_BLOCKED.has(s)) return "";
+        return /^[A-Z]{2}$/.test(s) ? s : "";
+      }
+
+      function countryName(cc) {
+        if (!cc || !regionNames) return "";
+        try {
+          const n = regionNames.of(cc);
+          // Região desconhecida: o Intl devolve o próprio código de volta.
+          return n && n !== cc ? n : "";
+        } catch {
+          return "";
+        }
+      }
+
+      // "BR" → 🇧🇷 (par de regional indicator symbols, U+1F1E6 + offset).
+      function flagFor(cc) {
+        if (!/^[A-Z]{2}$/.test(cc)) return "";
+        return String.fromCodePoint(
+          ...[...cc].map((ch) => 0x1f1e6 + ch.charCodeAt(0) - 65),
+        );
+      }
+
+      function countryCell(raw) {
+        const cc = countryCode(raw);
+        const name = countryName(cc);
+        // Sem código reconhecível (ou região inexistente): mostra o valor cru,
+        // sem bandeira — melhor que inventar um emoji errado.
+        if (!cc || !name) return "<td>" + esc(raw || "—") + "</td>";
+        const upper = String(raw).trim().toUpperCase();
+        const title = upper === cc ? name : name + " (" + raw + ")";
+        return (
+          '<td class="country" title="' + esc(title) + '">' +
+          '<span class="flag">' + flagFor(cc) + "</span>" +
+          esc(cc) +
+          "</td>"
+        );
+      }
+
       function currentSince() {
         return localStorage.getItem(SINCE_KEY) || "24h";
       }
@@ -404,82 +486,8 @@
         }
         empty.style.display = "none";
         tb.innerHTML = rows
-          .map((r) => "<tr><td>" + (r.currency || "unknown") + "</td><td>" + fmtInt(r.purchases) + "</td><td>" + fmtMoney(r.total, r.currency) + "</td></tr>")
+          .map((r) => "<tr><td>" + esc(r.currency || "unknown") + "</td><td>" + fmtInt(r.purchases) + "</td><td>" + esc(fmtMoney(r.total, r.currency)) + "</td></tr>")
           .join("");
-      }
-
-      // Subscription block. These numbers come from Apple's webhook, not from
-      // the app — they are the only ones that know about cancellation, renewal
-      // and refund.
-      //
-      // Kept SEPARATE from the Revenue table on purpose: the same sale emits a
-      // `subscribe` from the app and a `sub_started` from Apple. Adding both
-      // would double everything. The app measures the funnel up to the button;
-      // Apple measures what survived after it.
-      function paintSubs(s) {
-        const empty = document.getElementById("subs-empty");
-        const kpis = document.getElementById("subs-kpis");
-        const table = document.getElementById("subs-table");
-        const note = document.getElementById("subs-note");
-        if (!s) return;
-
-        const p = s.period || {};
-        const total = Object.values(p).reduce((a, b) => a + (b || 0), 0);
-        if (total === 0 && !s.now.active && !s.now.trialing) {
-          // Zero here is almost never "nobody cancelled" — it is the webhook
-          // not configured yet. Saying so prevents the worst possible reading
-          // of this dashboard.
-          empty.style.display = "";
-          empty.innerHTML =
-            "No notifications from Apple yet. Set the Production Server URL " +
-            "in <b>App Store Connect → App Information → App Store Server " +
-            'Notifications</b> (Version 2) pointing at <code>/apple/notifications</code>, ' +
-            "then run <code>npm run apple:test</code> to confirm delivery.";
-          kpis.innerHTML = "";
-          table.style.display = "none";
-          note.style.display = "none";
-          return;
-        }
-        empty.style.display = "none";
-        table.style.display = "";
-
-        const rev = (s.revenue || []).slice().sort((a, b) => b.net - a.net);
-        const top = rev[0];
-        const netStr = top ? fmtMoney(top.net, top.currency) : "—";
-        const netLabel = rev.length > 1 ? "Net (" + top.currency + " +" + (rev.length - 1) + ")" : "Net";
-        const refunds = rev.reduce((a, r) => a + r.refunds, 0);
-
-        const card = (n, label, sub) =>
-          '<div class="card"><h3>' + label + '</h3><div class="n">' + n +
-          '</div><div class="sub">' + (sub || "&nbsp;") + "</div></div>";
-
-        kpis.innerHTML =
-          card(fmtInt(s.now.active), "Paying now", "snapshot, not the window") +
-          card(fmtInt(s.now.trialing), "In trial", "still deciding") +
-          card(fmtInt(p.sub_cancelled), "Cancellations", "turned renewal off") +
-          card(fmtInt(s.now.cancelPending), "Still have access", "cancelled, not expired — win-back window") +
-          card(fmtPct(s.rates.trial_conversion), "Trial → paid", "among trials that already ended") +
-          card(netStr, netLabel, refunds ? refunds + " refund(s) deducted" : "confirmed by Apple");
-
-        const row = (label, n) =>
-          "<tr><td>" + label + "</td><td>" + fmtInt(n) + "</td></tr>";
-        document.getElementById("subs-rows").innerHTML =
-          row("Trials started", p.sub_trial_started) +
-          row("Direct subscriptions", (p.sub_started || 0) + (p.sub_resubscribed || 0)) +
-          row("Renewals charged", p.sub_renewed) +
-          row("Trials that became payments", p.sub_trial_converted) +
-          row("Cancelled during trial", p.sub_trial_cancelled) +
-          row("Cancelled while paying", (p.sub_cancelled || 0) - (p.sub_trial_cancelled || 0)) +
-          row("Changed their mind", p.sub_reactivated) +
-          row("Access ended", p.sub_expired) +
-          row("Billing failures", p.sub_billing_issue) +
-          row("Refunds", p.sub_refunded);
-
-        note.style.display = "";
-        note.innerHTML =
-          "Cancelling is not expiring: whoever cancels keeps access until the " +
-          "end of the paid period. The gap between those two rows is your " +
-          "win-back window.";
       }
 
       function paintCounts(rows) {
@@ -492,7 +500,7 @@
         }
         empty.style.display = "none";
         tb.innerHTML = rows
-          .map((r) => "<tr><td class=\"mono\">" + r.event + "</td><td>" + fmtInt(r.count) + "</td></tr>")
+          .map((r) => "<tr><td class=\"mono\">" + esc(r.event) + "</td><td>" + fmtInt(r.count) + "</td></tr>")
           .join("");
       }
 
@@ -514,13 +522,13 @@
             const short = (r.user_id || "").slice(0, 8);
             return (
               "<tr><td>" + fmtDate(r.ts) + "</td>" +
-              '<td class="mono">' + r.event + "</td>" +
-              "<td>" + (short || "—") + "</td>" +
-              "<td>" + (r.platform || "—") + "</td>" +
-              "<td>" + (r.country || "—") + "</td>" +
-              "<td>" + val + "</td></tr>" +
+              '<td class="mono">' + esc(r.event) + "</td>" +
+              "<td>" + esc(short || "—") + "</td>" +
+              "<td>" + esc(r.platform || "—") + "</td>" +
+              countryCell(r.country) +
+              "<td>" + esc(val) + "</td></tr>" +
               '<tr><td colspan="6"><details><summary>params</summary><pre>' +
-              params.replace(/</g, "&lt;") +
+              esc(params) +
               "</pre></details></td></tr>"
             );
           })
@@ -533,15 +541,13 @@
         const s = currentSince();
         const q = "?since=" + encodeURIComponent(s);
         try {
-          const [f, rev, counts, events, subs] = await Promise.all([
+          const [f, rev, counts, events] = await Promise.all([
             api("/admin/funnel" + q),
             api("/admin/revenue" + q),
             api("/admin/counts" + q),
             api("/admin/events" + q + "&limit=100"),
-            api("/admin/subscriptions" + q),
           ]);
           paintFunnel(f.funnel);
-          paintSubs(subs.subscriptions);
           paintRevenue(rev.revenue);
           paintCounts(counts.counts);
           paintEvents(events.events);
