@@ -278,6 +278,17 @@
       </section>
 
       <section class="panel">
+        <h2>Subscriptions · what Apple confirms</h2>
+        <div id="subs-empty" class="empty" style="display:none"></div>
+        <div class="grid" id="subs-kpis"></div>
+        <table id="subs-table" style="margin-top:14px">
+          <thead><tr><th>In this window</th><th>Count</th></tr></thead>
+          <tbody id="subs-rows"></tbody>
+        </table>
+        <div class="empty" id="subs-note" style="display:none"></div>
+      </section>
+
+      <section class="panel">
         <h2>Revenue</h2>
         <table>
           <thead><tr><th>Currency</th><th>Purchases</th><th>Total</th></tr></thead>
@@ -490,6 +501,79 @@
           .join("");
       }
 
+      // Bloco de assinaturas. Esses números vêm do webhook da Apple, não do
+      // app — são os únicos que sabem de cancelamento, renovação e reembolso.
+      //
+      // SEPARADO da tabela de Revenue de propósito: a mesma venda gera um
+      // `subscribe` do app e um `sub_started` da Apple. Somar os dois dobraria
+      // tudo. O app mede o funil até o botão; a Apple mede o que sobreviveu
+      // depois dele.
+      function paintSubs(s) {
+        const empty = document.getElementById("subs-empty");
+        const kpis = document.getElementById("subs-kpis");
+        const table = document.getElementById("subs-table");
+        const note = document.getElementById("subs-note");
+        if (!s) return;
+
+        const p = s.period || {};
+        const total = Object.values(p).reduce((a, b) => a + (b || 0), 0);
+        if (total === 0 && !s.now.active && !s.now.trialing) {
+          // Zero aqui quase nunca é "ninguém cancelou" — é o webhook ainda não
+          // configurado. Dizer isso evita a pior leitura possível do painel.
+          empty.style.display = "";
+          empty.innerHTML =
+            "Nenhuma notificação da Apple ainda. Configure a Production Server " +
+            "URL em <b>App Store Connect → App Information → App Store Server " +
+            'Notifications</b> (Version 2) apontando para <code>/apple/notifications</code>, ' +
+            "e rode <code>npm run apple:test</code> para confirmar a entrega.";
+          kpis.innerHTML = "";
+          table.style.display = "none";
+          note.style.display = "none";
+          return;
+        }
+        empty.style.display = "none";
+        table.style.display = "";
+
+        const rev = (s.revenue || []).slice().sort((a, b) => b.net - a.net);
+        const top = rev[0];
+        const netStr = top ? fmtMoney(top.net, top.currency) : "—";
+        const netLabel =
+          rev.length > 1 ? "Net (" + top.currency + " +" + (rev.length - 1) + ")" : "Net";
+        const refunds = rev.reduce((a, r) => a + r.refunds, 0);
+
+        const card = (n, label, sub) =>
+          '<div class="card"><h3>' + label + '</h3><div class="n">' + n +
+          '</div><div class="sub">' + (sub || "&nbsp;") + "</div></div>";
+
+        kpis.innerHTML =
+          card(fmtInt(s.now.active), "Pagando agora", "snapshot, não o período") +
+          card(fmtInt(s.now.trialing), "Em trial", "ainda decidindo") +
+          card(fmtInt(p.sub_cancelled), "Cancelamentos", "desligaram a renovação") +
+          card(fmtInt(s.now.cancelPending), "Ainda com acesso", "cancelou, não expirou — janela de win-back") +
+          card(fmtPct(s.rates.trial_conversion), "Trial → pago", "entre trials que já terminaram") +
+          card(netStr, netLabel, refunds ? refunds + " reembolso(s) descontado(s)" : "confirmado pela Apple");
+
+        const row = (label, n) =>
+          "<tr><td>" + label + "</td><td>" + fmtInt(n) + "</td></tr>";
+        document.getElementById("subs-rows").innerHTML =
+          row("Trials iniciados", p.sub_trial_started) +
+          row("Assinaturas diretas", (p.sub_started || 0) + (p.sub_resubscribed || 0)) +
+          row("Renovações cobradas", p.sub_renewed) +
+          row("Trials que viraram pagamento", p.sub_trial_converted) +
+          row("Cancelou durante o trial", p.sub_trial_cancelled) +
+          row("Cancelou já pagando", (p.sub_cancelled || 0) - (p.sub_trial_cancelled || 0)) +
+          row("Mudou de ideia", p.sub_reactivated) +
+          row("Acesso encerrado", p.sub_expired) +
+          row("Falhas de cobrança", p.sub_billing_issue) +
+          row("Reembolsos", p.sub_refunded);
+
+        note.style.display = "";
+        note.innerHTML =
+          "Cancelar não é expirar: quem cancela mantém o acesso até o fim do " +
+          "período pago. A distância entre essas duas linhas é a sua janela de " +
+          "win-back.";
+      }
+
       function paintCounts(rows) {
         const tb = document.getElementById("counts");
         const empty = document.getElementById("counts-empty");
@@ -541,13 +625,15 @@
         const s = currentSince();
         const q = "?since=" + encodeURIComponent(s);
         try {
-          const [f, rev, counts, events] = await Promise.all([
+          const [f, rev, counts, events, subs] = await Promise.all([
             api("/admin/funnel" + q),
             api("/admin/revenue" + q),
             api("/admin/counts" + q),
             api("/admin/events" + q + "&limit=100"),
+            api("/admin/subscriptions" + q),
           ]);
           paintFunnel(f.funnel);
+          paintSubs(subs.subscriptions);
           paintRevenue(rev.revenue);
           paintCounts(counts.counts);
           paintEvents(events.events);
